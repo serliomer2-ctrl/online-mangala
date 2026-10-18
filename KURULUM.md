@@ -43,7 +43,8 @@ Kullanılan ücretsiz servisler:
    npm start
    ```
 3. Tarayıcıda <http://localhost:3000> aç.
-4. **Admin ile giriş:** kullanıcı adı `admin`, şifre `admin`.
+4. **Kurucu ile giriş (en üst rank):** kullanıcı adı `kurucu`, şifre `kurucu`.
+   **Test admin (sınırsız para):** kullanıcı adı `admin`, şifre `admin`.
 5. Çevrimiçi denemek için ikinci bir tarayıcıda (veya gizli pencerede) başka bir hesapla gir ve **Oyna → Çevrimiçi → Rakip Bul**.
 
 Yerelde hesaplar `data/db.json` dosyasında tutulur.
@@ -98,7 +99,9 @@ Yerelde hesaplar `data/db.json` dosyasında tutulur.
    | Key | Value |
    |---|---|
    | `MONGODB_URI` | 3. adımda hazırladığın adres |
-   | `ADMIN_PASSWORD` | admin için güçlü bir şifre (aşağıdaki güvenlik notunu oku) |
+   | `FOUNDER_USER` | kurucu kullanıcı adın (ör. `omer`) — boşsa `kurucu` |
+   | `FOUNDER_PASSWORD` | kurucu için **güçlü** bir şifre |
+   | `ADMIN_PASSWORD` | test admin hesabı için güçlü bir şifre |
 
 5. **Create Web Service**. Kayıtlarda (Logs) şunları görünce hazırdır:
    ```
@@ -109,10 +112,11 @@ Yerelde hesaplar `data/db.json` dosyasında tutulur.
 
 > 💡 Kısa yol: **+ New → Blueprint** seçersen `render.yaml` ayarları otomatik doldurur; sadece ortam değişkenlerini girersin.
 
-### 🔐 Admin güvenlik notu (ÖNEMLİ)
-- Admin hesabı sunucu **ilk açıldığında** oluşur. Kullanıcı adı `admin`, şifre `ADMIN_PASSWORD` ortam değişkeni; boşsa `admin`.
-- Oyun internette herkese açık olacağı için `admin`/`admin` şifresini bırakırsan **herkes admin olup oyuncuları banlayabilir**. Mutlaka ya `ADMIN_PASSWORD` gir ya da ilk girişte **Profil → Şifre Değiştir** ile değiştir.
-- Admin hesabının parası sınırsızdır (∞), tüm botlar ve bulmacalar açıktır. Menüde **🛡️ Admin Paneli** görünür.
+### 🔐 Kurucu & admin güvenlik notu (ÖNEMLİ)
+- **Kurucu** hesabı sunucu ilk açıldığında `FOUNDER_USER` / `FOUNDER_PASSWORD` ile oluşur (boşsa `kurucu` / `kurucu`). Kurucu her şeyi yapabilir. **İnternette bu şifreyi mutlaka değiştir**; yoksa herkes kurucu olabilir.
+- **Test admin** hesabı (`admin`) `ADMIN_PASSWORD` ile oluşur (boşsa `admin`). Parası sınırsızdır (∞), tüm botlar ve bulmacalar açıktır.
+- Şifreleri ortam değişkeniyle vermediysen ilk girişte **Profil → Şifre Değiştir** ile değiştir.
+- Birine **Admin rankı** verdiğinde o kişi kendi hesabı ve kendi parasıyla devam eder. Sadece yönetim yetkileri açılır.
 
 ---
 
@@ -170,17 +174,48 @@ Değişiklik telefonda hemen görünmezse uygulamayı kapatıp tekrar aç.
 const TURN_MS = 30000;            // normal hamle süresi
 const BLITZ_MS = 8000;            // yıldırım hamle süresi
 const START_ELO = 1000, ELO_K = 32;
-const TOUR_FEE = { 4: 100, 8: 150 };  // çevrimiçi turnuva giriş ücreti
+const TOUR_PRIZE = { 4: { coins: 300, xp: 200 }, 8: { coins: 600, xp: 400 } };  // turnuvalar ÜCRETSİZ, şampiyona sabit ödül
+const RENAME_COOLDOWN_DAYS = 7;   // kullanıcı adı kaç günde bir değiştirilebilir
 ```
 Ligler: Bronz (0+), Gümüş (1100+), Altın (1300+), Elmas (1500+), Mangala Ustası (1700+).
 
 ---
 
-## 🛡️ Admin paneli neler yapabilir?
+## 👑 Ranklar ve yetkiler
 
-- Oyuncuları ara ve listele (çevrimiçi olanlar 🟢)
-- 🪙 Para ver / al · ⛔ Süreli ya da süresiz ban (sebep yazılabilir) · ✅ Banı kaldır
-- 👢 Sunucudan at · 🔑 Şifre belirle · ♻️ İlerlemeyi sıfırla · ⭐ Admin yap · 🗑️ Hesabı sil
+| Rank | Seviye | Neler yapabilir (varsayılan) |
+|---|---|---|
+| 👑 Kurucu | 1000 | Her şey + rank oluşturma/düzenleme, oyuncuya sınırsız para verme (kilitli, tek kişi) |
+| 🛡️ Admin | 100 | Ban, susturma, uyarı, para/XP/eşya, Elo, şifre, ad değiştirme, sıfırlama, silme, rank verme, etkinlik planlama |
+| 🔨 Moderatör | 50 | Atma, uyarı, susturma, ban, duyuru, maçları kapatma, kayıtlar |
+| 💬 Destek | 30 | Uyarı, susturma, maçları görme |
+| ▶️ YouTuber · 🎥 Medya · 💎 VIP | 10 / 10 / 5 | Sadece rozet (isminin yanında herkese görünür) |
+
+- Kurucu **Yönetim Paneli → Ranklar** bölümünde yeni rank ekleyebilir, ad/simge/renk/seviye ve her yetkiyi tek tek açıp kapatabilir.
+- Herkes sadece **kendinden düşük seviyedeki** oyunculara işlem yapabilir ve sadece kendinden düşük rankları verebilir.
+- **Sınırsız para** ayrı bir ayardır: kurucuda ve `admin` test hesabında açıktır. Kurucu, oyuncu detayından kişiye özel açıp kapatabilir.
+- Tüm yönetim işlemleri **Kayıtlar** sekmesine yazılır: kim, ne zaman, kime, ne yaptı.
+
+## 🎊 Etkinlik planlayıcı ve 🎨 arayüz tasarımcısı
+- **Etkinlik Planlayıcı:** Hazır şablonlardan etkinlik ekle (Çift Kuralı Festivali, 2x Para Hafta Sonu, XP Yağmuru, Bulmaca Maratonu, Yıldırım Kupası...). Şunlar ayarlanır:
+  - hedef türü ve sayısı,
+  - ödül (🪙 / XP / eşya),
+  - para ve XP çarpanı,
+  - başlangıç ve bitiş tarihi,
+  - özel fiyatlı mağaza ürünleri.
+
+  **Şimdi başlat, süreyi kısalt, uzat ve bitir** butonları var. Kaydedince herkese anında yansır.
+- **Arayüz Tasarımcısı (kurucu):** Ana menünün başlığını ve tema rengini seç (Altın / Yakut / Zümrüt / Safir / Ametist), hangi kartların görüneceğini belirle. Hazır bileşenler var: 🖼️ Afiş, 📰 Haber, ⏳ Geri sayım, 🎊 Etkinlik kartı, 🔘 Hızlı butonlar. Canlı önizlemeyle bakıp **Yayınla**.
+
+## ✏️ Kullanıcı adı değiştirme
+Profil → Hesap → **Değiştir**. Hesapta **doğrulanmış e-posta** olmalı; yoksa önce eklenip doğrulanması gerekir. Yeni ad için e-postaya 6 haneli kod gelir. Ad 7 günde bir değiştirilebilir.
+
+## 🛡️ Yönetim paneli neler yapabilir? (yetkiye göre)
+
+- Oyuncuları ara; birine tıklayınca yetkine göre işlem penceresi açılır (çevrimiçi olanlar 🟢)
+- 🪙 Para ver/al · ⭐ XP ver · 🎁 Eşya ver / tüm botları aç · 🏅 Elo ayarla
+- ⚠️ Uyarı gönder (oyuncunun ekranında anında açılır) · 🔇 Sustur · ⛔ Süreli/süresiz ban · ✅ Banı kaldır
+- 👢 Sunucudan at · 🔑 Şifre belirle · ✏️ Adını değiştir · 🎖️ Rank ver · ♻️ İlerlemeyi sıfırla · 🗑️ Hesabı sil
 - 📢 Tüm oyunculara duyuru gönder
 - 🎮 Canlı maçları gör, 👁️ izle veya ✖ kapat
 - 📧 E-posta servisi yoksa bekleyen doğrulama ve sıfırlama kodlarını gör

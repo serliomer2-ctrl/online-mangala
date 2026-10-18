@@ -10,7 +10,11 @@ services:
     envVars:
       - key: MONGODB_URI        # MongoDB Atlas bağlantı adresi (hesaplar kalıcı olsun diye ŞART)
         sync: false
-      - key: ADMIN_PASSWORD     # admin hesabının ilk şifresi (boş bırakılırsa "admin")
+      - key: FOUNDER_USER       # kurucu kullanıcı adı (boş bırakılırsa "kurucu")
+        sync: false
+      - key: FOUNDER_PASSWORD   # kurucu şifresi — MUTLAKA gir! (boş bırakılırsa "kurucu")
+        sync: false
+      - key: ADMIN_PASSWORD     # test admin hesabının ilk şifresi (boş bırakılırsa "admin")
         sync: false
       - key: BREVO_API_KEY      # e-posta ile kod göndermek için (isteğe bağlı)
         sync: false

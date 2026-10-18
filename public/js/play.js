@@ -5,7 +5,7 @@
 let G = null;
 const PARTY = ['reverse', 'mystery', 'cards'];
 const BLITZ_MS = 8000;
-const coinMult = () => curEvent().id === 'hazine' ? 2 : 1;
+const coinMult = () => curEvent().coinMult || 1;
 const xpFor = (res, bot, online) => { let x = { win: 120, draw: 70, loss: 40 }[res]; if (bot && res === 'win') x += bot.stars * 15; if (online) x = Math.round(x * 1.5); return x; };
 
 /* ---------- Oyun ekranı ---------- */
@@ -15,11 +15,13 @@ function gBase() {
 }
 function setupGameUI() {
   const o = G.kind === 'spectate' ? G.players[1] : G.opp, me = G.kind === 'spectate' ? G.players[0] : null;
-  const line = (p, lbl) => `${esc(p.name)} <span class="muted" style="font-weight:600;font-size:12px">${lbl || ''}</span>${p.title ? `<div class="ttl">${esc(titleTxt(p.title))}</div>` : ''}`;
+  const line = (p, lbl) => `${esc(p.name)} ${p.rank ? rankBadge(p.rank) : ''} <span class="muted" style="font-weight:600;font-size:12px">${lbl || ''}</span>${p.title ? `<div class="ttl">${esc(titleTxt(p.title))}</div>` : ''}`;
   $('g-av1').innerHTML = avatarHTML(o.avatar, o.frame, 42);
+  $('g-av1').onclick = (G.kind === 'online' || G.kind === 'spectate') && !o.guest && o.name ? () => viewProfile(o.name) : null;
+  $('g-av1').style.cursor = $('g-av1').onclick ? 'pointer' : '';
   $('g-nm1').innerHTML = line(o, o.label || (o.elo ? leagueBadge(o.elo) + ' ' + o.elo : (o.level ? t('Sv') + ' ' + o.level : '')));
   if (me) { $('g-av0').innerHTML = avatarHTML(me.avatar, me.frame, 42); $('g-nm0').innerHTML = line(me, me.elo ? leagueBadge(me.elo) + ' ' + me.elo : ''); }
-  else { $('g-av0').innerHTML = avatarHTML(S.eq.avatar, S.eq.frame, 42); $('g-nm0').innerHTML = line({ name: myName(), title: S.title }, AUTH.user && G.ranked ? leagueBadge(AUTH.user.elo) + ' ' + AUTH.user.elo : t('Sv') + ' ' + levelInfo(S.xp).L); }
+  else { $('g-av0').innerHTML = avatarHTML(S.eq.avatar, S.eq.frame, 42); $('g-nm0').innerHTML = line({ name: myName(), title: S.title, rank: AUTH.user && AUTH.user.rank }, AUTH.user && G.ranked ? leagueBadge(AUTH.user.elo) + ' ' + AUTH.user.elo : t('Sv') + ' ' + levelInfo(S.xp).L); }
   $('g-think').textContent = ''; ['bub0', 'bub1'].forEach(b => $(b).className = 'bubble');
   const bn = $('g-banner');
   if (G.mode !== 'classic' && G.kind !== 'puzzle') { bn.style.display = ''; bn.innerHTML = `${MODES[G.mode].icon} <b>${nm(MODES[G.mode])}</b> — ${dsc(MODES[G.mode])}`; } else bn.style.display = 'none';
@@ -218,7 +220,7 @@ async function endGame(r, opt = {}) {
   if (G.kind === 'btour') coins = 0;
   if (opt.resignedMe) coins = 0;
   coins *= coinMult();
-  const xp = opt.resignedMe ? 10 : xpFor(outcome, bot, online);
+  const xp = opt.resignedMe ? 10 : Math.round(xpFor(outcome, bot, online) * (curEvent().xpMult || 1));
   const T = S.totals; T.games++; if (outcome === 'win') T.wins++; if (outcome === 'draw') T.draws++;
   if (online) { T.online++; if (outcome === 'win') T.onlineWins++; }
   if (!opt.reason) T.best = Math.max(T.best, me);
@@ -314,7 +316,7 @@ RENDER.mode = () => {
       <button class="card mcard mode" onclick="go('bots')"><div class="ic">🤖</div><h3>${t('Botlara Karşı')}</h3><p>${t('5 seviye + Yıldırım ve Parti modları')}</p></button>
       <button class="card mcard mode" onclick="onlineTab='play';go('online')"><div class="ic">🌍</div><h3>${t('Çevrimiçi')}</h3><p>${t('Hızlı, dereceli, yıldırım, parti, özel oda')}</p><p style="margin-top:6px"><span class="badge">+%50 XP</span></p></button>
       <button class="card mcard mode" onclick="go('puzzles')"><div class="ic">🧩</div><h3>${t('Bulmacalar')}</h3><p>${t('{0} taktik görev', PUZZLES.length)}</p></button>
-      <button class="card mcard mode" onclick="tourView='bot';go('tour')"><div class="ic">🏆</div><h3>${t('Bot Turnuvası')}</h3><p>${t('4 veya 8 kişilik eleme, kazanan potu alır')}</p></button>
+      <button class="card mcard mode" onclick="tourView='bot';go('tour')"><div class="ic">🏆</div><h3>${t('Bot Turnuvası')}</h3><p>${t('4 veya 8 kişilik eleme, ücretsiz katılım')}</p></button>
       <button class="card mcard mode" onclick="onlineTab='tour';go('online')"><div class="ic">🌐🏆</div><h3>${t('Çevrimiçi Turnuva')}</h3><p>${t('Gerçek oyuncularla braket turnuvası')}</p></button>
       <button class="card mcard mode" onclick="openReplays()"><div class="ic">🎬</div><h3>${t('Maç Tekrarları')}</h3><p>${t('Tekrar izle + Yapay Zekâ Koçu')}</p></button>
     </div>`;
@@ -406,19 +408,18 @@ function puzzleHint() {
    BOT TURNUVASI (çevrimdışı)
    ========================================================= */
 let tourView = 'bot';
-const BT_FEE = { 4: 100, 8: 200 };
+const BT_PRIZE = { 4: { coins: 200, xp: 150 }, 8: { coins: 400, xp: 300 } };   // ücretsiz katılım, sabit ödül
 async function startBotTour(size) {
-  const fee = BT_FEE[size];
-  if (!isAdmin() && S.coins < fee) { Sound.sfx.error(); toast(t('Yetersiz para! {0} 🪙 daha lazım.', fee - S.coins)); return; }
-  const ok = await modal(`<div class="big">🏆</div><h3>${t('{0} kişilik Bot Turnuvası', size)}</h3><p>${t('Giriş ücreti: {0} 🪙 · Ödül havuzu: {1} 🪙', fee, fee * size)}</p><p class="muted small">${t('Elenene kadar oynarsın. Şampiyon tüm potu alır!')}</p>`, [{ label: t('Vazgeç'), cls: 'sec', value: 0 }, { label: t('Katıl'), value: 1 }]);
-  if (!ok || !spend(fee)) return;
+  const pr = BT_PRIZE[size];
+  const ok = await modal(`<div class="big">🏆</div><h3>${t('{0} kişilik Bot Turnuvası', size)}</h3><p>${t('Katılım ücretsiz · Şampiyon ödülü: {0} 🪙 + {1} XP', pr.coins, pr.xp)}</p><p class="muted small">${t('Elenene kadar oynarsın. Şampiyon ödülü kazanır!')}</p>`, [{ label: t('Vazgeç'), cls: 'sec', value: 0 }, { label: t('Katıl'), value: 1 }]);
+  if (!ok) return;
   let pool = size === 4 ? shuffled(BOTS.map(b => b.id), 'bt' + Date.now()).slice(0, 3) : [...BOTS.map(b => b.id), ...shuffled(BOTS.map(b => b.id), 'bt2' + Date.now()).slice(0, 2)];
   const used = {};
   const ents = [{ me: true, name: myName() }, ...pool.map(id => { used[id] = (used[id] || 0) + 1; const b = BOTS.find(x => x.id === id); return { bot: id, name: nm(b) + (used[id] > 1 ? ' II' : '') }; })];
   const order = shuffled(ents.map((_, i) => i), 'o' + Date.now());
   const E2 = order.map(i => ents[i]);
   const r0 = []; for (let i = 0; i < size; i += 2) r0.push({ a: i, b: i + 1, winner: null });
-  S.btour = { size, fee, pot: fee * size, ents: E2, rounds: [r0], round: 0, status: 'running' };
+  S.btour = { size, prize: pr, ents: E2, rounds: [r0], round: 0, status: 'running' };
   persist(); updTop(true); tourView = 'bot'; go('tour');
 }
 function simBotMatch(aId, bId) {
@@ -451,7 +452,7 @@ function btourAdvance() {
     if (R.some(m => m.winner == null)) break;   // senin maçın bekliyor
     if (R.length === 1) {
       T.status = 'done'; T.champion = R[0].winner;
-      if (T.ents[T.champion].me) { S.coins += T.pot; S.tourWins = (S.tourWins || 0) + 1; unlockAch('turnuva'); confetti(); Sound.sfx.win(); setTimeout(() => modal(`<div class="big">👑</div><h3>${t('TURNUVA ŞAMPİYONU!')}</h3><div class="rewards"><span>+${T.pot} 🪙</span></div>`, [{ label: t('Harika!'), value: 1 }]), 300); }
+      if (T.ents[T.champion].me) { const pz = T.prize || BT_PRIZE[T.size]; S.coins += pz.coins; addXP(pz.xp); S.tourWins = (S.tourWins || 0) + 1; unlockAch('turnuva'); confetti(); Sound.sfx.win(); setTimeout(() => modal(`<div class="big">👑</div><h3>${t('TURNUVA ŞAMPİYONU!')}</h3><div class="rewards"><span>+${(T.prize || BT_PRIZE[T.size]).coins} 🪙</span><span>+${(T.prize || BT_PRIZE[T.size]).xp} XP</span></div>`, [{ label: t('Harika!'), value: 1 }]), 300); }
       break;
     }
     const next = []; for (let i = 0; i < R.length; i += 2) next.push({ a: R[i].winner, b: R[i + 1].winner, winner: null });
@@ -479,10 +480,10 @@ RENDER.tour = () => {
   let h = `<button class="btn sec sm back" onclick="go('mode')">← ${t('Geri')}</button><h2>🏆 ${t('Bot Turnuvası')}</h2>`;
   if (!T || T.status === 'done') {
     if (T && T.status === 'done') h += `<div class="card" style="text-align:center;margin-bottom:12px"><div style="font-size:46px">${T.ents[T.champion].me ? '👑' : '🏆'}</div><h3>${t('Şampiyon')}: ${esc(T.ents[T.champion].name)}</h3>${bracketHTML(T, i => T.ents[i].me)}</div>`;
-    h += `<div class="modes">${[4, 8].map(n => `<div class="card mode"><div class="ic">${n === 4 ? '🥉' : '🏆'}</div><h3>${t('{0} Kişilik', n)}</h3><p class="muted">${t('Giriş: {0} 🪙 · Pot: {1} 🪙', BT_FEE[n], BT_FEE[n] * n)}</p><button class="btn" onclick="startBotTour(${n})">${t('Katıl')}</button></div>`).join('')}</div>`;
+    h += `<div class="modes">${[4, 8].map(n => `<div class="card mode"><div class="ic">${n === 4 ? '🥉' : '🏆'}</div><h3>${t('{0} Kişilik', n)}</h3><p class="muted">${t('Ücretsiz · Şampiyon: {0} 🪙 + {1} XP', BT_PRIZE[n].coins, BT_PRIZE[n].xp)}</p><button class="btn" onclick="startBotTour(${n})">${t('Katıl')}</button></div>`).join('')}</div>`;
   } else {
     const my = btourMyMatch(), elim = !my && T.status === 'running';
-    h += `<div class="card"><div class="row between"><b>${t('Ödül havuzu')}: ${T.pot} 🪙</b><span class="badge">${roundName(T.round, Math.log2(T.size))}</span></div>${bracketHTML(T, i => T.ents[i].me)}
+    h += `<div class="card"><div class="row between"><b>${t('Şampiyon ödülü')}: ${(T.prize || BT_PRIZE[T.size]).coins} 🪙 + ${(T.prize || BT_PRIZE[T.size]).xp} XP</b><span class="badge">${roundName(T.round, Math.log2(T.size))}</span></div>${bracketHTML(T, i => T.ents[i].me)}
       <div class="row center">${my ? `<button class="btn" onclick="btourPlay()">⚔️ ${t('Maçını Oyna')}</button>` : ''}${elim ? `<span class="muted">${t('Elendin. Turnuva sonuçlanıyor...')}</span>` : ''}</div></div>`;
     if (elim) setTimeout(() => { btourAdvance(); if (curScreen === 'tour') RENDER.tour(); }, 600);
   }
@@ -632,10 +633,16 @@ async function netHandle(m) {
     case 'tour': NET.tour = m.tour; if (NET.lobby === 'tourq') { NET.lobby = 'idle'; tourView = 'online'; if (!(G && !G.over)) go('tour'); }
       if (curScreen === 'tour' && tourView === 'online') RENDER.tour(); break;
     case 'tourEnd': NET.tour = m.tour; if (m.you) { S.tourWins = (S.tourWins || 0) + 1; unlockAch('turnuva'); persist(); confetti(); Sound.sfx.win(); }
-      setTimeout(() => modal(`<div class="big">${m.you ? '👑' : '🏆'}</div><h3>${m.you ? t('TURNUVA ŞAMPİYONU!') : t('Şampiyon') + ': ' + esc(m.champion)}</h3>${m.you ? `<div class="rewards"><span>+${m.pot} 🪙</span></div>` : ''}`, [{ label: t('Tamam'), value: 1 }]), 1500);
+      setTimeout(() => modal(`<div class="big">${m.you ? '👑' : '🏆'}</div><h3>${m.you ? t('TURNUVA ŞAMPİYONU!') : t('Şampiyon') + ': ' + esc(m.champion)}</h3>${m.you && m.prize ? `<div class="rewards"><span>+${m.prize.coins} 🪙</span><span>+${m.prize.xp} XP</span></div>` : ''}`, [{ label: t('Tamam'), value: 1 }]), 1500);
       if (curScreen === 'tour') RENDER.tour(); break;
     case 'saveUpdate': adoptServer(m.save, m.rev, null); break;
     case 'announce': toast(esc(m.msg), 6000); Sound.sfx.extra(); break;
+    case 'me': if (AUTH.user) { const had = can('panel'); AUTH.user = m.user; fixCoins(); persist(); updTop(true);
+        if (!had && can('panel')) toast('🛡️ ' + t('Yeni yetkiler aldın! Menüde Yönetim Paneli açıldı.'), 5000);
+        if (curScreen === 'admin' && !can('panel')) go('menu'); else if (['menu', 'profile'].includes(curScreen)) go(curScreen); } break;
+    case 'warn': Sound.sfx.error(); vib([80, 60, 80]);
+      modal(`<div class="big">⚠️</div><h3>${t('Yönetimden uyarı')}</h3><p>${esc(m.msg)}</p><p class="muted small">— ${esc(m.by || '')}</p>`, [{ label: t('Anladım'), value: 1 }]); break;
+    case 'content': setContent(m.content); break;
     case 'kicked': NET.manual = true; closeModal(); G = null;
       await modal(`<div class="big">⛔</div><h3>${esc(t(m.msg))}</h3>`, [{ label: t('Tamam'), value: 1 }]);
       if (/yasak|banned|silindi|deleted/i.test(m.msg)) logout(); else go('menu'); break;
@@ -645,7 +652,7 @@ function netStart(m) {
   closeModal(); NET.you = m.you; NET.lobby = 'game';
   const o = m.opp || {};
   G = { kind: 'online', mode: m.mode, qmode: m.qmode, ranked: m.ranked, tour: m.tour, st: m.st, init: Engine.clone(m.st), acts: [], scoreHist: [], over: false, busy: false, turnMs: m.turnMs, turnGain: 0,
-    opp: { name: o.name || t('Rakip'), avatar: CAT.avatars[o.avatar] ? o.avatar : 'gulen', frame: CAT.frames[o.frame] ? o.frame : 'yok', hand: CAT.hands[o.hand] ? o.hand : 'klasik', title: o.title, elo: m.ranked ? o.elo : null, level: o.level } };
+    opp: { name: o.name || t('Rakip'), avatar: CAT.avatars[o.avatar] ? o.avatar : 'gulen', frame: CAT.frames[o.frame] ? o.frame : 'yok', hand: CAT.hands[o.hand] ? o.hand : 'klasik', title: o.title, elo: m.ranked ? o.elo : null, level: o.level, rank: o.rank || null, guest: o.guest } };
   go('game'); setupGameUI(); gRender();
   setStatus((G.st.turn === 0 ? '🎲 ' + t('Kura: Sen başlıyorsun!') : '🎲 ' + t('Kura: {0} başlıyor.', esc(G.opp.name))) + ` <span class="muted small">(${t('{0} sn/hamle', Math.round(m.turnMs / 1000))})</span>`, 'info');
   setTimer(G.st.turn, m.turnMs); Sound.sfx.extra(); vib(40);
@@ -705,7 +712,7 @@ RENDER.online = () => {
   } else if (NET.state !== 'ok') h += `<div class="spinner"></div>`;
   else if (NET.lobby === 'queue') h += `<div class="card" style="text-align:center"><div class="spinner"></div><h3>${t('Rakip aranıyor...')}</h3><p class="muted">${{ casual: t('Hızlı Eşleşme'), ranked: t('Dereceli'), blitz: t('Yıldırım'), party: t('Parti Modu') }[NET.qmode] || ''}</p><button class="btn sec" onclick="netSend({t:'cancel'})">${t('İptal')}</button></div>`;
   else if (NET.lobby === 'room') h += `<div class="card" style="text-align:center"><p>${t('Bu kodu arkadaşına gönder; o da "Odaya Katıl"a yazsın:')}</p><div class="code">${esc(NET.code)}</div><p class="muted">${MODES[privMode].icon} ${nm(MODES[privMode])}</p><div class="spinner"></div><button class="btn sec" onclick="netSend({t:'cancel'})">${t('Odayı Kapat')}</button></div>`;
-  else if (NET.lobby === 'tourq') h += `<div class="card" style="text-align:center"><div class="spinner"></div><h3>${t('Turnuva oyuncuları bekleniyor')}: ${NET.tourQ ? NET.tourQ.n + '/' + NET.tourQ.size : ''}</h3><p class="muted">${t('Dolunca turnuva otomatik başlar.')}</p><button class="btn sec" onclick="netSend({t:'tourLeave'})">${t('Ayrıl (ücret iade edilir)')}</button></div>`;
+  else if (NET.lobby === 'tourq') h += `<div class="card" style="text-align:center"><div class="spinner"></div><h3>${t('Turnuva oyuncuları bekleniyor')}: ${NET.tourQ ? NET.tourQ.n + '/' + NET.tourQ.size : ''}</h3><p class="muted">${t('Dolunca turnuva otomatik başlar.')}</p><button class="btn sec" onclick="netSend({t:'tourLeave'})">${t('Sıradan Ayrıl')}</button></div>`;
   else if (onlineTab === 'play') {
     const q = (mode, ic, name, desc, need) => `<div class="card mode"><div class="ic">${ic}</div><h3>${name}</h3><p class="muted small">${desc}</p><button class="btn ${need && !AUTH.user ? 'sec' : ''}" ${need && !AUTH.user ? 'disabled' : ''} onclick="netSend({t:'queue',mode:'${mode}'})">${need && !AUTH.user ? '🔒 ' + t('Giriş gerekli') : t('Rakip Bul')}</button></div>`;
     h += `<div class="modes">${q('casual', '⚡', t('Hızlı Eşleşme'), t('Klasik kurallar, rastgele rakip.'))}${q('ranked', '🏅', t('Dereceli'), t('Elo puanı kazan, liglerde yüksel: Bronz → Mangala Ustası.'), true)}
@@ -717,13 +724,13 @@ RENDER.online = () => {
   } else if (onlineTab === 'tour') {
     const inTour = NET.tour && NET.tour.status === 'running';
     h += inTour ? `<div class="card"><p>${t('Devam eden bir turnuvadasın.')}</p><button class="btn" onclick="tourView='online';go('tour')">🏆 ${t('Turnuva Tablosu')}</button></div>`
-      : `<div class="modes">${[[4, 100], [8, 150]].map(([n, fee]) => `<div class="card mode"><div class="ic">${n === 4 ? '🥉' : '🏆'}</div><h3>${t('{0} Kişilik', n)}</h3><p class="muted">${t('Giriş: {0} 🪙 · Pot: {1} 🪙', fee, fee * n)}</p><button class="btn" ${AUTH.user ? '' : 'disabled'} onclick="netSend({t:'tourJoin',size:${n}})">${AUTH.user ? t('Katıl') : '🔒 ' + t('Giriş gerekli')}</button></div>`).join('')}</div>
-         <p class="muted small">${t('Oyuncular dolunca eleme usulü turnuva başlar. Elenenler diğer maçları izleyebilir. Şampiyon tüm potu alır.')}</p>`;
+      : `<div class="modes">${[[4, 300, 200], [8, 600, 400]].map(([n, pc, px]) => `<div class="card mode"><div class="ic">${n === 4 ? '🥉' : '🏆'}</div><h3>${t('{0} Kişilik', n)}</h3><p class="muted">${t('Ücretsiz · Şampiyon: {0} 🪙 + {1} XP', pc, px)}</p><button class="btn" ${AUTH.user ? '' : 'disabled'} onclick="netSend({t:'tourJoin',size:${n}})">${AUTH.user ? t('Katıl') : '🔒 ' + t('Giriş gerekli')}</button></div>`).join('')}</div>
+         <p class="muted small">${t('Oyuncular dolunca eleme usulü turnuva başlar. Katılım ücretsiz; elenenler diğer maçları izleyebilir, şampiyon ödülü kazanır.')}</p>`;
   } else if (onlineTab === 'watch') {
     h += `<div class="row" style="margin-bottom:10px"><button class="btn sec sm" onclick="netSend({t:'lives'})">🔄 ${t('Yenile')}</button><input class="codein" id="codein" maxlength="4" placeholder="${t('KOD')}"><button class="btn sm" onclick="spectateCode()">👁️ ${t('Kodla izle')}</button></div>
       <div class="list">${(NET.lives || []).map(r => `<div class="lrow"><div class="grow"><b>${esc(r.names[0])} ${r.scores[0]} – ${r.scores[1]} ${esc(r.names[1])}</b><span class="muted small">${MODES[r.mode].icon} ${nm(MODES[r.mode])}${r.qmode === 'ranked' ? ' · 🏅' : ''}${r.tour ? ' · 🏆' : ''}${r.specs ? ' · 👁️ ' + r.specs : ''}</span></div><button class="btn xs" onclick="spectate('${r.code}')">${t('İzle')}</button></div>`).join('') || `<p class="muted">${t('Şu an canlı maç yok.')}</p>`}</div>`;
   } else if (onlineTab === 'top') {
-    h += `<div class="list">${(NET.lb || []).map((u, i) => `<div class="lrow"><span class="rk">${i < 3 ? ['🥇', '🥈', '🥉'][i] : i + 1}</span>${avatarHTML(u.avatar || 'gulen', 'yok', 34)}<div class="grow"><b>${esc(u.name)}</b><span class="muted small">${u.w}G ${u.d}B ${u.l}M</span></div>${leagueBadge(u.elo)}<b>${u.elo}</b></div>`).join('') || `<p class="muted">${NET.lb ? t('Henüz dereceli maç oynanmadı.') : '...'}</p>`}</div>
+    h += `<div class="list">${(NET.lb || []).map((u, i) => `<button class="lrow" style="width:100%;text-align:left" onclick="viewProfile('${esc(u.name)}')"><span class="rk">${i < 3 ? ['🥇', '🥈', '🥉'][i] : i + 1}</span>${avatarHTML(u.avatar || 'gulen', 'yok', 34)}<div class="grow"><b>${esc(u.name)} ${u.rank ? rankBadge(u.rank) : ''}</b><span class="muted small">${u.w}G ${u.d}B ${u.l}M</span></div>${leagueBadge(u.elo)}<b>${u.elo}</b></button>`).join('') || `<p class="muted">${NET.lb ? t('Henüz dereceli maç oynanmadı.') : '...'}</p>`}</div>
       <div class="card" style="margin-top:12px"><b>${t('Ligler')}</b><div class="row" style="margin-top:8px">${LEAGUES.map(l => `<span class="lg" style="color:${l.color}">${l.icon} ${nm(l)} ${l.min}+</span>`).join('')}</div></div>`;
   }
   el.innerHTML = h;
@@ -737,7 +744,7 @@ function renderOnlineTour(el) {
   let h = `<button class="btn sec sm back" onclick="onlineTab='tour';go('online')">← ${t('Geri')}</button><h2>🌐🏆 ${t('Çevrimiçi Turnuva')}</h2>`;
   if (!T) { el.innerHTML = h + `<p class="muted">${t('Aktif turnuva yok.')}</p>`; return; }
   const meIdx = T.players.findIndex(p => p.name === myName());
-  h += `<div class="card"><div class="row between"><b>${t('Ödül havuzu')}: ${T.pot} 🪙</b><span class="badge">${T.status === 'done' ? t('Bitti') + ' · 👑 ' + esc(T.champion) : roundName(T.round, Math.log2(T.size))}</span></div>
+  h += `<div class="card"><div class="row between"><b>${t('Şampiyon ödülü')}: ${T.prize ? T.prize.coins + ' 🪙 + ' + T.prize.xp + ' XP' : ''}</b><span class="badge">${T.status === 'done' ? t('Bitti') + ' · 👑 ' + esc(T.champion) : roundName(T.round, Math.log2(T.size))}</span></div>
     ${bracketHTML(T, i => i === meIdx, m => m.room && m.winner == null ? `<button class="live" onclick="spectate('${m.room}')">🔴 ${t('CANLI · İzle')}</button>` : '')}
     <p class="muted small" style="text-align:center">${T.status === 'running' ? (T.players[meIdx] && T.players[meIdx].alive ? t('Sıradaki maçın hazır olunca otomatik başlar.') : t('Elendin. Diğer maçları izleyebilirsin.')) : ''}</p></div>`;
   el.innerHTML = h;
@@ -748,7 +755,7 @@ function renderOnlineTour(el) {
    ========================================================= */
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('sw.js').catch(() => { });
 (async () => {
-  document.documentElement.lang = LANG;
+  document.documentElement.lang = LANG; loadContent();
   const a = lsGet('mangala_auth');
   if (a && a.token) {
     AUTH.token = a.token;

@@ -2,7 +2,7 @@
 //  Dijital Mangala - Sunucu
 //  • Oyunun web sayfasını sunar (public/)
 //  • Hesaplar: kayıt, giriş, şifre değiştirme, e-posta kodu
-//  • Admin paneli API'si (ban, para verme, ...)
+//  • Yönetim: kurucu, ranklar & yetkiler, etkinlik planlama, arayüz tasarımı
 //  • Çevrimiçi maçlar: normal, dereceli (Elo), yıldırım, parti modları
 //  • Turnuvalar (4/8 kişi) ve izleyici modu
 // =====================================================
@@ -14,15 +14,19 @@ const { WebSocketServer } = require('ws');
 const E = require('./public/js/engine.js');
 const DB = require('./lib/db');
 const mail = require('./lib/mail');
+const ST = require('./lib/staff');
 
 // ---------------- AYARLAR ----------------
 const PORT = process.env.PORT || 3000;
 const TURN_MS = 30000;              // normal hamle süresi
 const BLITZ_MS = 8000;              // yıldırım modu hamle süresi
 const ADMIN_USER = 'admin';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin';   // Render'da ADMIN_PASSWORD ile değiştir!
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin';   // test hesabı (sınırsız para) — Render'da değiştir!
+const FOUNDER_USER = process.env.FOUNDER_USER || 'kurucu';         // en üst rank: Kurucu
+const FOUNDER_PASSWORD = process.env.FOUNDER_PASSWORD || 'kurucu'; // Render'da MUTLAKA değiştir!
 const START_ELO = 1000, ELO_K = 32;
-const TOUR_FEE = { 4: 100, 8: 150 };  // turnuva giriş ücreti (kazanan tüm potu alır)
+const TOUR_PRIZE = { 4: { coins: 300, xp: 200 }, 8: { coins: 600, xp: 400 } };  // turnuvalar ücretsiz; şampiyona sabit ödül
+const RENAME_COOLDOWN_DAYS = 7;
 const MAX_MSG_PER_SEC = 30;
 const EMOTE_COOLDOWN_MS = 1500;
 const SESSION_DAYS = 30;
@@ -43,8 +47,9 @@ const userRe = /^[a-zA-Z0-9_]{3,16}$/;
 const emailRe = /^[^\s@<>]{1,64}@[^\s@<>]{1,190}\.[a-z]{2,}$/i;
 const code6 = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
 const isBanned = u => u && u.banned && (u.banned.until === 0 || u.banned.until > now());
-const publicUser = u => ({ name: u.name, role: u.role, email: u.email || '', emailVerified: !!u.emailVerified, elo: u.elo, league: leagueOf(u.elo),
-  ranked: u.ranked, created: u.created });
+const publicUser = u => ({ name: u.name, role: u.role || 'user', rank: ST.badge(u), level: ST.level(u), perms: u.role === ST.FOUNDER ? ST.PERMS : ST.rankOf(u).perms,
+  unlimited: ST.unlimited(u), email: u.email || '', emailVerified: !!u.emailVerified, elo: u.elo, league: leagueOf(u.elo), ranked: u.ranked, created: u.created,
+  renamedAt: u.renamedAt || 0, muted: u.muted && (u.muted === -1 || u.muted > now()) ? u.muted : 0 });
 const maskEmail = e => e.replace(/^(.{2}).*(@.*)$/, '$1***$2');
 function newUser(name, pw, email) {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -66,7 +71,7 @@ function limited(ip, bucket, max, windowMs) {
 setInterval(() => { const t = now(); for (const [k, h] of hits) if (h.reset < t) hits.delete(k); }, 60000);
 
 const codes = new Map(); // key -> {code, exp, tries, kind, email}
-function makeCode(key, kind, email) { const c = { code: code6(), exp: now() + 15 * 60000, tries: 0, kind, email }; codes.set(kind + ':' + key, c); return c; }
+function makeCode(key, kind, email, data) { const c = { code: code6(), exp: now() + 15 * 60000, tries: 0, kind, email, data }; codes.set(kind + ':' + key, c); return c; }
 function checkCode(key, kind, code) {
   const c = codes.get(kind + ':' + key);
   if (!c || c.exp < now()) return 'Kodun süresi dolmuş, yeni kod iste.';
@@ -74,8 +79,9 @@ function checkCode(key, kind, code) {
   if (String(code).trim() !== c.code) return 'Kod yanlış.';
   codes.delete(kind + ':' + key); return null;
 }
-async function sendCode(u, kind, email, lang) {
-  const c = makeCode(u.key, kind, email);
+const peekCode = (key, kind) => codes.get(kind + ':' + key);
+async function sendCode(u, kind, email, lang, data) {
+  const c = makeCode(u.key, kind, email, data);
   const m = mail.codeMail(c.code, kind, lang);
   try { if (await mail.send(email, m.subject, m.html)) return 'mail'; }
   catch (e) { console.error('E-posta gönderilemedi:', e.message); }
@@ -94,6 +100,19 @@ async function modifySave(key, fn) {
   pushUser(key, { t: 'saveUpdate', save: u.save, rev: u.rev });
   return u;
 }
+const reserved = n => [ADMIN_USER, FOUNDER_USER.toLowerCase(), 'kurucu', 'founder', 'admin', 'sistem', 'system', 'moderator', 'misafir'].includes(n.toLowerCase());
+async function doRename(u, newName) {
+  newName = String(newName || '').trim();
+  if (!userRe.test(newName)) return 'Kullanıcı adı 3-16 karakter olmalı (harf, rakam, _).';
+  if (newName.toLowerCase() !== u.key && await db.getUser(newName.toLowerCase())) return 'Bu kullanıcı adı alınmış.';
+  if (reserved(newName) && newName.toLowerCase() !== u.key) return 'Bu kullanıcı adı kullanılamaz.';
+  const old = u.key, nu = await db.renameUser(old, newName);
+  nu.renamedAt = now(); await db.saveUser(nu);
+  const set = userSockets.get(old);
+  if (set) { userSockets.delete(old); userSockets.set(nu.key, set); for (const ws of set) { ws.user.key = nu.key; ws.user.name = nu.name; ws.profile.name = nu.name; } }
+  return nu;
+}
+const pushMe = u => pushUser(u.key, { t: 'me', user: publicUser(u) });
 function kickUser(key, msg) { for (const ws of userSockets.get(key) || []) { sendWs(ws, { t: 'kicked', msg }); ws.close(); } }
 
 // ---------------- HTTP ----------------
@@ -114,8 +133,53 @@ async function authUser(req) {
   u._token = tok; return u;
 }
 
+const need = (a, p) => ST.can(a, p) ? null : [403, { error: 'Bu işlem için yetkin yok.' }];
+// hedef oyuncuya işlem: yetki + rank hiyerarşisi + kayıt (audit)
+function act(perm, fn) {
+  return async (req, b, ip, a) => {
+    const e = need(a, perm); if (e) return e;
+    const u = await db.getUser(String(b.username || '').toLowerCase()); if (!u) return [404, { error: 'Kullanıcı yok.' }];
+    if (u.key !== a.key && (u.role === ST.FOUNDER || ST.level(u) >= ST.level(a))) return [403, { error: 'Kendinle aynı veya daha yüksek ranktaki birine işlem yapamazsın.' }];
+    const out = await fn(a, u, b);
+    if (typeof out[0] === 'number') return out;
+    ST.log(a, out[0], u.name, out[1] || ''); return [200, { ok: true }];
+  };
+}
+const broadcastContent = () => wss.clients.forEach(c => sendWs(c, { t: 'content', content: ST.content() }));
 const api = {
   'GET /api/config': async () => [200, { mail: mail.configured(), db: db.kind }],
+  'GET /api/content': async () => [200, ST.content()],
+  'GET /api/profile': async (req, b, ip, a, q) => {
+    const u = await db.getUser(String(q.get('name') || '').toLowerCase().slice(0, 16)); if (!u) return [404, { error: 'Kullanıcı yok.' }];
+    const sv = u.save || {}, T = sv.totals || {};
+    return [200, { name: u.name, rank: ST.badge(u), elo: u.elo, league: leagueOf(u.elo), ranked: u.ranked, created: u.created, online: userSockets.has(u.key),
+      avatar: sv.eq ? sv.eq.avatar : 'gulen', frame: sv.eq ? sv.eq.frame : 'yok', title: sv.title || '', xp: sv.xp || 0, bio: String(sv.bio || '').slice(0, 80),
+      totals: { games: T.games || 0, wins: T.wins || 0, online: T.online || 0, onlineWins: T.onlineWins || 0, best: T.best || 0 },
+      achs: Object.keys(sv.achs || {}).length, puzzles: Object.keys(sv.puzzles || {}).length, tourWins: sv.tourWins || 0 }];
+  },
+  'POST /api/username/request': async (req, b, ip) => {
+    const u = await authUser(req); if (!u) return [401, { error: 'Oturum bulunamadı.' }];
+    if (limited(ip, 'rename', 6, 3600000)) return [429, { error: 'Çok fazla istek. Biraz sonra tekrar dene.' }];
+    if (!u.email) return [400, { error: 'Kullanıcı adını değiştirmek için önce hesabına e-posta eklemelisin.', needEmail: true }];
+    if (!u.emailVerified) return [400, { error: 'Önce e-posta adresini doğrulamalısın.', needVerify: true }];
+    if (u.key === ADMIN_USER || u.role === ST.FOUNDER) return [400, { error: 'Bu hesabın adı değiştirilemez.' }];
+    const left = (u.renamedAt || 0) + RENAME_COOLDOWN_DAYS * 864e5 - now();
+    if (left > 0 && !ST.can(u, 'rename')) return [400, { error: 'Kullanıcı adını 7 günde bir değiştirebilirsin.', left }];
+    const nn = String(b.newName || '').trim();
+    if (!userRe.test(nn)) return [400, { error: 'Kullanıcı adı 3-16 karakter olmalı (harf, rakam, _).' }];
+    if (nn.toLowerCase() !== u.key && await db.getUser(nn.toLowerCase())) return [409, { error: 'Bu kullanıcı adı alınmış.' }];
+    if (reserved(nn)) return [400, { error: 'Bu kullanıcı adı kullanılamaz.' }];
+    const st = await sendCode(u, 'rename', u.email, b.lang, { newName: nn });
+    return [200, { ok: true, email: maskEmail(u.email), mailStatus: st }];
+  },
+  'POST /api/username/confirm': async (req, b) => {
+    const u = await authUser(req); if (!u) return [401, { error: 'Oturum bulunamadı.' }];
+    const c = peekCode(u.key, 'rename'); const nn = c && c.data && c.data.newName;
+    const err = checkCode(u.key, 'rename', b.code); if (err) return [400, { error: err }];
+    const old = u.name, nu = await doRename(u, nn); if (typeof nu === 'string') return [400, { error: nu }];
+    ST.log(nu, 'Kullanıcı adını değiştirdi', nu.name, old + ' → ' + nu.name);
+    return [200, { ok: true, user: publicUser(nu) }];
+  },
 
   'POST /api/register': async (req, b, ip) => {
     if (limited(ip, 'reg', 10, 3600000)) return [429, { error: 'Çok fazla deneme. Biraz sonra tekrar dene.' }];
@@ -220,64 +284,129 @@ const api = {
     return [200, { list: top.map(u => ({ name: u.name, elo: u.elo, league: leagueOf(u.elo), ...u.ranked, avatar: u.save && u.save.eq ? u.save.eq.avatar : 'gulen' })) }];
   },
 
-  // ---------------- ADMIN ----------------
-  'GET /api/admin/stats': async (req, b, ip, admin) => {
+  // ---------------- YÖNETİM (yetkiye göre) ----------------
+  'GET /api/admin/stats': async (req, b, ip, a) => {
     const pend = [...codes.entries()].filter(([, c]) => c.exp > now()).map(([k, c]) => ({ user: k.split(':')[1], kind: c.kind, email: c.email, code: c.code, left: Math.round((c.exp - now()) / 60000) }));
     return [200, { users: await db.countUsers(), online: onlineCount(), rooms: [...rooms.values()].filter(r => r.players[1] && !r.over).length,
       tours: [...tours.values()].filter(t => t.status === 'running').length, queues: Object.fromEntries(Object.entries(queues).map(([k, v]) => [k, v.length])),
-      mail: mail.configured(), db: db.kind, codes: mail.configured() ? [] : pend }];
+      mail: mail.configured(), db: db.kind, codes: mail.configured() || !ST.can(a, 'setpw') ? [] : pend, me: publicUser(a), perms: ST.PERMS, metrics: ST.METRICS }];
   },
-  'GET /api/admin/users': async (req, b, ip, admin, q) => {
+  'GET /api/admin/users': async (req, b, ip, a, q) => {
     const page = Math.max(0, parseInt(q.get('page') || '0', 10)); const s = (q.get('q') || '').toLowerCase().slice(0, 40);
     const { total, users } = await db.listUsers(s, page * 25, 25);
-    return [200, { total, users: users.map(u => ({ name: u.name, email: u.email, emailVerified: u.emailVerified, role: u.role, banned: isBanned(u) ? u.banned : null,
-      elo: u.elo, coins: u.save ? u.save.coins || 0 : 0, level: u.save ? u.save.xp || 0 : 0, created: u.created, lastLogin: u.lastLogin, online: userSockets.has(u.key) })) }];
+    return [200, { total, users: users.map(u => ({ name: u.name, email: ST.can(a, 'setpw') ? u.email : '', emailVerified: u.emailVerified, role: u.role || 'user', rank: ST.badge(u),
+      level: ST.level(u), unlimited: ST.unlimited(u), banned: isBanned(u) ? u.banned : null, muted: u.muted && (u.muted === -1 || u.muted > now()) ? u.muted : 0,
+      elo: u.elo, coins: u.save ? u.save.coins || 0 : 0, xp: u.save ? u.save.xp || 0 : 0, created: u.created, lastLogin: u.lastLogin, online: userSockets.has(u.key), warns: (u.warns || []).length })) }];
   },
-  'POST /api/admin/ban': async (req, b, ip, admin) => {
-    const u = await db.getUser(String(b.username || '').toLowerCase()); if (!u) return [404, { error: 'Kullanıcı yok.' }];
-    if (u.role === 'admin') return [400, { error: 'Admin yasaklanamaz.' }];
+  'GET /api/admin/user': async (req, b, ip, a, q) => {
+    const u = await db.getUser(String(q.get('name') || '').toLowerCase()); if (!u) return [404, { error: 'Kullanıcı yok.' }];
+    const sv = u.save || {};
+    return [200, { name: u.name, role: u.role || 'user', rank: ST.badge(u), level: ST.level(u), unlimited: ST.unlimited(u), ownUnlimited: !!u.unlimited, email: ST.can(a, 'setpw') ? u.email : '', emailVerified: u.emailVerified,
+      banned: isBanned(u) ? u.banned : null, muted: u.muted && (u.muted === -1 || u.muted > now()) ? u.muted : 0, warns: u.warns || [], elo: u.elo, ranked: u.ranked, created: u.created,
+      lastLogin: u.lastLogin, online: userSockets.has(u.key), coins: sv.coins || 0, xp: sv.xp || 0, totals: sv.totals || {}, achs: Object.keys(sv.achs || {}).length,
+      items: Object.values(sv.own || {}).reduce((x, y) => x + (Array.isArray(y) ? y.length : 0), 0), bots: sv.bots || [], tutorialDone: !!sv.tutorialDone,
+      self: u.key === a.key, canAct: u.key === a.key || (u.role !== ST.FOUNDER && ST.level(u) < ST.level(a)) }];
+  },
+  'POST /api/admin/ban': act('ban', async (a, u, b) => {
+    if (u.key === a.key) return [400, { error: 'Kendini yasaklayamazsın.' }];
     const mins = Math.max(0, parseInt(b.minutes, 10) || 0);
-    u.banned = { until: mins ? now() + mins * 60000 : 0, reason: String(b.reason || '').slice(0, 120), by: admin.name, at: now() };
+    u.banned = { until: mins ? now() + mins * 60000 : 0, reason: String(b.reason || '').slice(0, 120), by: a.name, at: now() };
     await db.saveUser(u); await db.delSessionsOf(u.key);
     kickUser(u.key, 'Hesabın yasaklandı' + (u.banned.reason ? ': ' + u.banned.reason : '.'));
-    return [200, { ok: true }];
-  },
-  'POST /api/admin/unban': async (req, b) => { const u = await db.getUser(String(b.username || '').toLowerCase()); if (!u) return [404, { error: 'Kullanıcı yok.' }]; u.banned = null; await db.saveUser(u); return [200, { ok: true }]; },
-  'POST /api/admin/coins': async (req, b) => {
+    return ['Banladı', (mins ? mins + ' dk' : 'süresiz') + (u.banned.reason ? ' · ' + u.banned.reason : '')];
+  }),
+  'POST /api/admin/unban': act('ban', async (a, u) => { u.banned = null; await db.saveUser(u); return ['Banı kaldırdı']; }),
+  'POST /api/admin/mute': act('mute', async (a, u, b) => {
+    if (u.key === a.key) return [400, { error: 'Kendini susturamazsın.' }];
+    const mins = Math.max(0, parseInt(b.minutes, 10) || 0); u.muted = mins ? now() + mins * 60000 : -1; await db.saveUser(u);
+    for (const ws of userSockets.get(u.key) || []) ws.user.muted = u.muted;
+    pushUser(u.key, { t: 'warn', msg: 'Emoji ve mesajların susturuldu' + (mins ? ' (' + mins + ' dk).' : '.'), by: a.name }); pushMe(u);
+    return ['Susturdu', mins ? mins + ' dk' : 'süresiz'];
+  }),
+  'POST /api/admin/unmute': act('mute', async (a, u) => { u.muted = 0; await db.saveUser(u); for (const ws of userSockets.get(u.key) || []) ws.user.muted = 0; pushMe(u); return ['Susturmayı kaldırdı']; }),
+  'POST /api/admin/warn': act('warn', async (a, u, b) => {
+    const msg = String(b.msg || '').replace(/[<>]/g, '').slice(0, 200); if (!msg) return [400, { error: 'Mesaj boş.' }];
+    u.warns = (u.warns || []).concat({ at: now(), by: a.name, msg }).slice(-30); await db.saveUser(u);
+    pushUser(u.key, { t: 'warn', msg, by: a.name }); return ['Uyardı', msg];
+  }),
+  'POST /api/admin/kick': act('kick', async (a, u) => { kickUser(u.key, 'Admin seni sunucudan çıkardı.'); return ['Sunucudan attı']; }),
+  'POST /api/admin/coins': act('coins', async (a, u, b) => {
     const amt = parseInt(b.amount, 10); if (!Number.isFinite(amt) || Math.abs(amt) > 1e7) return [400, { error: 'Geçersiz miktar.' }];
-    const u = await modifySave(String(b.username || '').toLowerCase(), s => { s.coins = Math.max(0, (s.coins || 0) + amt); });
-    if (!u) return [404, { error: 'Kullanıcı yok.' }];
-    pushUser(u.key, { t: 'announce', msg: (amt >= 0 ? '🎁 Admin sana ' + amt + ' 🪙 gönderdi!' : '⚠️ Admin hesabından ' + (-amt) + ' 🪙 aldı.') });
-    return [200, { ok: true, coins: u.save.coins }];
-  },
-  'POST /api/admin/setpw': async (req, b) => {
-    const u = await db.getUser(String(b.username || '').toLowerCase()); if (!u) return [404, { error: 'Kullanıcı yok.' }];
+    await modifySave(u.key, s => { s.coins = Math.max(0, (s.coins || 0) + amt); });
+    pushUser(u.key, { t: 'announce', msg: amt >= 0 ? '🎁 ' + a.name + ': +' + amt + ' 🪙' : '⚠️ ' + a.name + ': ' + amt + ' 🪙' });
+    return ['Para verdi', (amt > 0 ? '+' : '') + amt];
+  }),
+  'POST /api/admin/xp': act('xp', async (a, u, b) => {
+    const amt = parseInt(b.amount, 10); if (!Number.isFinite(amt) || Math.abs(amt) > 1e7) return [400, { error: 'Geçersiz miktar.' }];
+    await modifySave(u.key, s => { s.xp = Math.max(0, (s.xp || 0) + amt); s.pass = s.pass || {}; if (amt > 0) s.pass.xp = (s.pass.xp || 0) + amt; });
+    pushUser(u.key, { t: 'announce', msg: '⭐ ' + a.name + ': ' + (amt > 0 ? '+' : '') + amt + ' XP' });
+    return ['XP verdi', (amt > 0 ? '+' : '') + amt];
+  }),
+  'POST /api/admin/item': act('items', async (a, u, b) => {
+    if (b.bots) { await modifySave(u.key, s => { s.bots = ['kolay', 'orta', 'zor', 'cokzor', 'efsane']; }); return ['Tüm botları açtı']; }
+    const cat = String(b.cat || ''), id = String(b.id || '');
+    if (!['boards', 'stones', 'hands', 'avatars', 'frames', 'emojis', 'msgs'].includes(cat) || !idRe.test(id)) return [400, { error: 'Geçersiz eşya.' }];
+    await modifySave(u.key, s => { s.own = s.own || {}; s.own[cat] = s.own[cat] || []; if (!s.own[cat].includes(id)) s.own[cat].push(id); });
+    pushUser(u.key, { t: 'announce', msg: '🎁 ' + a.name + ' sana bir eşya gönderdi!' });
+    return ['Eşya verdi', cat + '/' + id];
+  }),
+  'POST /api/admin/elo': act('elo', async (a, u, b) => { u.elo = Math.max(100, Math.min(5000, parseInt(b.elo, 10) || START_ELO)); await db.saveUser(u); pushMe(u); return ['Elo ayarladı', String(u.elo)]; }),
+  'POST /api/admin/setpw': act('setpw', async (a, u, b) => {
     if (String(b.password || '').length < 6) return [400, { error: 'Şifre en az 6 karakter.' }];
     u.salt = crypto.randomBytes(16).toString('hex'); u.hash = hashPw(b.password, u.salt); await db.saveUser(u); await db.delSessionsOf(u.key);
-    return [200, { ok: true }];
-  },
-  'POST /api/admin/resetprogress': async (req, b) => {
-    const u = await modifySave(String(b.username || '').toLowerCase(), (s, user) => { for (const k of Object.keys(s)) delete s[k]; s.reset = true; });
-    if (!u) return [404, { error: 'Kullanıcı yok.' }];
-    u.elo = START_ELO; u.ranked = { w: 0, l: 0, d: 0 }; await db.saveUser(u);
-    return [200, { ok: true }];
-  },
-  'POST /api/admin/role': async (req, b, ip, admin) => {
-    const u = await db.getUser(String(b.username || '').toLowerCase()); if (!u) return [404, { error: 'Kullanıcı yok.' }];
-    if (u.key === ADMIN_USER) return [400, { error: 'Ana admin değiştirilemez.' }];
-    u.role = b.role === 'admin' ? 'admin' : 'user'; await db.saveUser(u); return [200, { ok: true }];
-  },
-  'POST /api/admin/delete': async (req, b) => {
-    const key = String(b.username || '').toLowerCase(); if (key === ADMIN_USER) return [400, { error: 'Ana admin silinemez.' }];
-    kickUser(key, 'Hesabın silindi.'); await db.deleteUser(key); return [200, { ok: true }];
-  },
-  'POST /api/admin/kick': async (req, b) => { kickUser(String(b.username || '').toLowerCase(), 'Admin seni sunucudan çıkardı.'); return [200, { ok: true }]; },
-  'POST /api/admin/announce': async (req, b) => {
+    return ['Şifre belirledi'];
+  }),
+  'POST /api/admin/rename': act('rename', async (a, u, b) => {
+    if (u.key === ADMIN_USER || u.role === ST.FOUNDER) return [400, { error: 'Bu hesabın adı değiştirilemez.' }];
+    const old = u.name, nu = await doRename(u, b.newName); if (typeof nu === 'string') return [400, { error: nu }];
+    pushMe(nu); return ['Adını değiştirdi', old + ' → ' + nu.name];
+  }),
+  'POST /api/admin/resetprogress': act('resetprogress', async (a, u) => {
+    await modifySave(u.key, s => { for (const k of Object.keys(s)) delete s[k]; s.reset = true; });
+    const fresh = await db.getUser(u.key); fresh.elo = START_ELO; fresh.ranked = { w: 0, l: 0, d: 0 }; await db.saveUser(fresh);
+    return ['İlerlemesini sıfırladı'];
+  }),
+  'POST /api/admin/delete': act('delete', async (a, u) => {
+    if (u.key === a.key || u.key === ADMIN_USER) return [400, { error: 'Bu hesap silinemez.' }];
+    kickUser(u.key, 'Hesabın silindi.'); await db.deleteUser(u.key); return ['Hesabı sildi'];
+  }),
+  'POST /api/admin/role': act('ranks', async (a, u, b) => {
+    const role = String(b.role || 'user');
+    const r = role === 'user' ? { level: 0 } : ST.ranks.find(x => x.id === role);
+    if (!r || role === ST.FOUNDER) return [400, { error: 'Bu rank verilemez.' }];
+    if (u.key === a.key) return [400, { error: 'Kendi rankını değiştiremezsin.' }];
+    if (a.role !== ST.FOUNDER && r.level >= ST.level(a)) return [403, { error: 'Sadece kendinden düşük rankları verebilirsin.' }];
+    u.role = role; await db.saveUser(u);
+    for (const ws of userSockets.get(u.key) || []) { ws.user.role = role; ws.profile = cleanProfile(ws.profile, ws); }
+    pushMe(u); return ['Rank verdi', role];
+  }),
+  'POST /api/admin/unlimited': act('ranksEdit', async (a, u, b) => { u.unlimited = !!b.on; await db.saveUser(u); pushMe(u); return ['Sınırsız para', b.on ? 'açık' : 'kapalı']; }),
+  'POST /api/admin/announce': async (req, b, ip, a) => {
+    const e = need(a, 'announce'); if (e) return e;
     const msg = String(b.msg || '').replace(/[<>]/g, '').slice(0, 200); if (!msg) return [400, { error: 'Mesaj boş.' }];
-    wss.clients.forEach(c => sendWs(c, { t: 'announce', msg: '📢 ' + msg })); return [200, { ok: true }];
+    wss.clients.forEach(c => sendWs(c, { t: 'announce', msg: '📢 ' + msg })); ST.log(a, 'Duyuru', '', msg); return [200, { ok: true }];
   },
-  'GET /api/admin/rooms': async () => [200, { rooms: liveRooms(true) }],
-  'POST /api/admin/closeroom': async (req, b) => { const r = rooms.get(String(b.code || '')); if (!r) return [404, { error: 'Oda yok.' }]; finish(r, -1, 'admin'); return [200, { ok: true }]; }
+  'GET /api/admin/rooms': async (req, b, ip, a) => need(a, 'rooms') || [200, { rooms: liveRooms(true) }],
+  'POST /api/admin/closeroom': async (req, b, ip, a) => {
+    const e = need(a, 'rooms'); if (e) return e;
+    const r = rooms.get(String(b.code || '')); if (!r) return [404, { error: 'Oda yok.' }]; finish(r, -1, 'admin'); ST.log(a, 'Maçı kapattı', r.code); return [200, { ok: true }];
+  },
+  'GET /api/admin/audit': async (req, b, ip, a) => need(a, 'audit') || [200, { list: ST.audit.slice(0, 300) }],
+  'POST /api/admin/ranks': async (req, b, ip, a) => {
+    const e = need(a, 'ranksEdit'); if (e) return e;
+    if (!await ST.setRanks(b.ranks)) return [400, { error: 'Geçersiz rank listesi.' }];
+    ST.log(a, 'Rankları düzenledi', '', ST.ranks.map(r => r.id).join(', ')); broadcastContent(); return [200, { ok: true, ranks: ST.publicRanks() }];
+  },
+  'POST /api/admin/events': async (req, b, ip, a) => {
+    const e = need(a, 'events'); if (e) return e;
+    if (!await ST.setEvents(b.events)) return [400, { error: 'Geçersiz etkinlik listesi.' }];
+    ST.log(a, 'Etkinlikleri düzenledi', '', (b.events || []).map(x => x.name).join(', ')); broadcastContent(); return [200, { ok: true, content: ST.content() }];
+  },
+  'POST /api/admin/ui': async (req, b, ip, a) => {
+    const e = need(a, 'ui'); if (e) return e;
+    if (!await ST.setUI(b.ui)) return [400, { error: 'Geçersiz tasarım.' }];
+    ST.log(a, 'Arayüzü düzenledi'); broadcastContent(); return [200, { ok: true, content: ST.content() }];
+  }
 };
 
 const server = http.createServer(async (req, res) => {
@@ -292,7 +421,7 @@ const server = http.createServer(async (req, res) => {
       let admin = null;
       if (url.pathname.startsWith('/api/admin/')) {
         admin = await authUser(req);
-        if (!admin || admin.role !== 'admin') return json(res, 403, { error: 'Yetkin yok.' });
+        if (!admin || !ST.can(admin, 'panel')) return json(res, 403, { error: 'Yetkin yok.' });
       }
       const [code, out] = await h(req, body, ip, admin, url.searchParams);
       return json(res, code, out);
@@ -331,16 +460,12 @@ function cleanProfile(p, ws) {
   const prof = { name: String(p.name || 'Misafir').replace(/[<>&"'`]/g, '').trim().slice(0, 16) || 'Misafir',
     avatar: pick(p.avatar, 'gulen'), frame: pick(p.frame, 'yok'), hand: pick(p.hand, 'klasik'), title: pick(p.title, ''),
     level: Math.max(1, Math.min(999, parseInt(p.level, 10) || 1)), guest: !ws.user };
-  if (ws.user) { prof.name = ws.user.name; prof.elo = ws.user.elo; prof.league = leagueOf(ws.user.elo); prof.admin = ws.user.role === 'admin'; }
+  if (ws.user) { prof.name = ws.user.name; prof.elo = ws.user.elo; prof.league = leagueOf(ws.user.elo); prof.rank = ST.badge(ws.user); }
   return prof;
 }
 function removeFromQueues(ws) {
   for (const k in queues) queues[k] = queues[k].filter(q => q !== ws);
-  for (const s in tourQueues) {
-    const before = tourQueues[s].length;
-    tourQueues[s] = tourQueues[s].filter(q => q !== ws);
-    if (before !== tourQueues[s].length && ws.user) modifySave(ws.user.key, sv => { sv.coins = (sv.coins || 0) + TOUR_FEE[s]; }); // iade
-  }
+  for (const s in tourQueues) tourQueues[s] = tourQueues[s].filter(q => q !== ws);
 }
 function liveRooms(all) {
   return [...rooms.values()].filter(r => r.players[1] && !r.over && (all || !r.private)).map(r => ({ code: r.code, mode: r.mode, qmode: r.qmode,
@@ -435,7 +560,7 @@ function unspec(ws) { const r = rooms.get(ws.spectating); if (r) r.specs.delete(
 
 // ---------------- TURNUVA ----------------
 function tourSummary(t) {
-  return { id: t.id, size: t.size, fee: t.fee, pot: t.fee * t.size, status: t.status, round: t.round, champion: t.champion != null ? t.players[t.champion].name : null,
+  return { id: t.id, size: t.size, prize: TOUR_PRIZE[t.size], status: t.status, round: t.round, champion: t.champion != null ? t.players[t.champion].name : null,
     players: t.players.map(p => ({ name: p.name, avatar: p.profile.avatar, frame: p.profile.frame, alive: p.alive, online: !!(p.ws && p.ws.readyState === 1) })),
     rounds: t.rounds.map(r => r.map(m => ({ a: m.a, b: m.b, winner: m.winner, room: m.room && rooms.has(m.room) && !rooms.get(m.room).over ? m.room : null,
       score: m.score || null }))) };
@@ -443,7 +568,7 @@ function tourSummary(t) {
 const tourBroadcast = t => t.players.forEach(p => sendWs(p.ws, { t: 'tour', tour: tourSummary(t) }));
 function createTour(size, list) {
   const id = makeCodeStr(tours);
-  const t = { id, size, fee: TOUR_FEE[size], status: 'running', round: 0, rounds: [],
+  const t = { id, size, status: 'running', round: 0, rounds: [],
     players: list.sort(() => Math.random() - 0.5).map(ws => ({ ws, key: ws.user.key, name: ws.profile.name, profile: ws.profile, alive: true })) };
   tours.set(id, t);
   t.players.forEach(p => { p.ws.tour = id; });
@@ -484,8 +609,9 @@ function tourAdvance(t) {
   if (r.length === 1) {                            // final bitti
     t.status = 'done'; t.champion = r[0].winner;
     const champ = t.players[t.champion];
-    modifySave(champ.key, sv => { sv.coins = (sv.coins || 0) + t.fee * t.size; sv.tourWins = (sv.tourWins || 0) + 1; });
-    t.players.forEach(p => sendWs(p.ws, { t: 'tourEnd', champion: champ.name, you: p === champ, pot: t.fee * t.size, tour: tourSummary(t) }));
+    const pr = TOUR_PRIZE[t.size];
+    modifySave(champ.key, sv => { sv.coins = (sv.coins || 0) + pr.coins; sv.xp = (sv.xp || 0) + pr.xp; sv.tourWins = (sv.tourWins || 0) + 1; });
+    t.players.forEach(p => sendWs(p.ws, { t: 'tourEnd', champion: champ.name, you: p === champ, prize: pr, tour: tourSummary(t) }));
     setTimeout(() => tours.delete(t.id), 10 * 60000);
     return;
   }
@@ -512,7 +638,7 @@ wss.on('connection', ws => {
           const s = typeof m.token === 'string' && m.token.length < 100 ? await db.getSession(m.token) : null;
           const u = s ? await db.getUser(s.key) : null;
           if (u && isBanned(u)) { sendWs(ws, { t: 'kicked', msg: 'Hesabın yasaklandı.' }); return ws.close(); }
-          if (u) { ws.user = { key: u.key, name: u.name, elo: u.elo, role: u.role }; if (!userSockets.has(u.key)) userSockets.set(u.key, new Set()); userSockets.get(u.key).add(ws); }
+          if (u) { ws.user = { key: u.key, name: u.name, elo: u.elo, role: u.role, muted: u.muted || 0 }; if (!userSockets.has(u.key)) userSockets.set(u.key, new Set()); userSockets.get(u.key).add(ws); }
           ws.profile = cleanProfile(m.profile, ws);
           sendWs(ws, { t: 'authed', user: !!u, elo: u ? u.elo : null, league: u ? leagueOf(u.elo) : null });
           break;
@@ -569,6 +695,7 @@ wss.on('connection', ws => {
         case 'emote': {
           const r = room || (ws.spectating && rooms.get(ws.spectating));
           if (!r || !room) return;
+          if (ws.user && ws.user.muted && (ws.user.muted === -1 || ws.user.muted > now())) return sendWs(ws, { t: 'err', msg: 'Susturuldun, emoji ve mesaj gönderemezsin.' });
           if (now() - ws.lastEmote < EMOTE_COOLDOWN_MS) return;
           if (!(m.kind === 'e' || m.kind === 'm') || typeof m.id !== 'string' || !/^[a-z0-9_]{1,20}:\d{1,2}$/.test(m.id)) return;
           ws.lastEmote = now();
@@ -607,11 +734,6 @@ wss.on('connection', ws => {
           if (!ws.user) return sendWs(ws, { t: 'err', msg: 'Turnuvaya katılmak için giriş yapmalısın.' });
           if (ws.room || inLiveTour(ws) || tourQueues[4].includes(ws) || tourQueues[8].includes(ws)) return;
           if ([...tourQueues[4], ...tourQueues[8]].some(o => o.user && o.user.key === ws.user.key)) return sendWs(ws, { t: 'err', msg: 'Zaten bir turnuva sırasındasın.' });
-          const fee = TOUR_FEE[size];
-          const u = await db.getUser(ws.user.key);
-          const unlimited = u.role === 'admin';
-          if (!unlimited && (!u.save || (u.save.coins || 0) < fee)) return sendWs(ws, { t: 'err', msg: `Turnuva için ${fee} 🪙 gerekli.` });
-          if (!unlimited) await modifySave(u.key, sv => { sv.coins -= fee; });
           tourQueues[size] = tourQueues[size].filter(o => o.readyState === 1);
           tourQueues[size].push(ws);
           if (tourQueues[size].length >= size) createTour(size, tourQueues[size].splice(0, size));
@@ -636,13 +758,20 @@ setInterval(() => { const n = onlineCount(); wss.clients.forEach(c => sendWs(c, 
 // ---------------- başlat ----------------
 (async () => {
   db = await DB.open();
+  await ST.load(db);
+  // Kurucu (en üst rank)
+  let f = await db.getUser(FOUNDER_USER.toLowerCase());
+  if (!f) { f = newUser(FOUNDER_USER, FOUNDER_PASSWORD, ''); f.role = ST.FOUNDER; f.unlimited = true; f.save = { tutorialDone: true }; await db.saveUser(f);
+    console.log(`Kurucu hesabı oluşturuldu (kullanıcı: ${FOUNDER_USER}, şifre: ${process.env.FOUNDER_PASSWORD ? 'FOUNDER_PASSWORD' : 'kurucu'})`); }
+  else if (f.role !== ST.FOUNDER) { f.role = ST.FOUNDER; f.unlimited = true; await db.saveUser(f); }
+  // Test admin hesabı (sınırsız para)
   let admin = await db.getUser(ADMIN_USER);
   if (!admin) {
-    admin = newUser('admin', ADMIN_PASSWORD, ''); admin.role = 'admin';
-    admin.save = { tutorialDone: true, coins: 999999999 };
+    admin = newUser('admin', ADMIN_PASSWORD, ''); admin.role = 'admin'; admin.unlimited = true;
+    admin.save = { tutorialDone: true };
     await db.saveUser(admin);
-    console.log(`Admin hesabı oluşturuldu (kullanıcı: admin, şifre: ${process.env.ADMIN_PASSWORD ? 'ADMIN_PASSWORD' : 'admin'})`);
-  } else if (admin.role !== 'admin') { admin.role = 'admin'; await db.saveUser(admin); }
+    console.log(`Test admin hesabı oluşturuldu (kullanıcı: admin, şifre: ${process.env.ADMIN_PASSWORD ? 'ADMIN_PASSWORD' : 'admin'})`);
+  } else { admin.unlimited = true; if (!admin.role || admin.role === 'user') admin.role = 'admin'; await db.saveUser(admin); }
   if (!mail.configured()) console.log('E-posta servisi ayarlı değil: doğrulama kodları kayıtlara ve admin paneline yazılacak.');
   server.listen(PORT, () => console.log(`Mangala sunucusu çalışıyor: http://localhost:${PORT}`));
 })();

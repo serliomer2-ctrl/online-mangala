@@ -37,12 +37,25 @@ function normalize(raw) {
 }
 let S = normalize({});
 const AUTH = { token: null, user: null, rev: 0, guest: false, offline: false };
-const isAdmin = () => !!(AUTH.user && AUTH.user.role === 'admin');
+const unlimited = () => !!(AUTH.user && AUTH.user.unlimited);
+const can = p => !!(AUTH.user && Array.isArray(AUTH.user.perms) && AUTH.user.perms.includes(p));
+const isAdmin = unlimited;   // eski adı: sadece "sınırsız para" anlamına gelir
+function fixCoins() { if (!unlimited() && S.coins >= 999999999) S.coins = 0; }
+const rankBadge = r => r ? `<span class="rk-b" style="color:${r.color};border-color:${r.color}">${r.icon || ''} ${esc(nm(r))}</span>` : '';
+/* ---------- kurucunun yönettiği içerik (ranklar, etkinlikler, arayüz) ---------- */
+let CONTENT = lsGet('mangala_content', null) || { ranks: [], events: [], ui: null };
+function setContent(c) {
+  if (!c) return; CONTENT = c; lsSet('mangala_content', c); applyAccent();
+  if (typeof S !== 'undefined' && S.event) ensurePeriods();
+  if (['menu', 'events', 'shop'].includes(curScreen)) go(curScreen);
+}
+async function loadContent() { try { const { s: st, j } = await api('GET', '/api/content', null, 70000); if (st === 200) setContent(j); } catch { } }
+function applyAccent() { document.body.dataset.acc = (CONTENT.ui && CONTENT.ui.accent) || 'gold'; }
+applyAccent();
 const myName = () => AUTH.user ? AUTH.user.name : S.name;
 const cacheKey = () => AUTH.guest ? 'mangala_guest_v3' : 'mangala_cache_' + (AUTH.user ? AUTH.user.name.toLowerCase() : 'x');
 let syncTimer = null, syncing = false, syncAgain = false;
 function persist() {
-  if (isAdmin()) S.coins = Math.max(S.coins, 999999999);
   lsSet(cacheKey(), { save: S, rev: AUTH.rev });
   if (!AUTH.guest && AUTH.token) { clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, 1200); }
 }
@@ -65,7 +78,7 @@ async function syncNow() {
 }
 function adoptServer(save, rev, msg) {
   S = normalize(save || {}); AUTH.rev = rev;
-  if (isAdmin()) { S.coins = 999999999; S.tutorialDone = S.tutorialDone || false; }
+  fixCoins();
   lsSet(cacheKey(), { save: S, rev: AUTH.rev });
   applySettings(); updTop(true);
   if (msg) toast(msg);
@@ -180,7 +193,7 @@ function playGuest() {
 }
 function enterGame() {
   document.body.classList.remove('authscr');
-  applySettings(); ensurePeriods(); persist(); updTop();
+  fixCoins(); applySettings(); ensurePeriods(); persist(); updTop(); loadContent();
   go(S.tutorialDone ? 'menu' : 'tutorial');
   netConnect();
 }
@@ -233,6 +246,35 @@ async function changeEmail() {
   AUTH.user.email = v.em.toLowerCase(); AUTH.user.emailVerified = false;
   verifyEmailFlow(j.mailStatus);
 }
+async function changeUsername() {
+  const u = AUTH.user; if (!u) return;
+  if (!u.email) { const ok = await modal(`<div class="big">📧</div><h3>${t('Önce e-posta ekle')}</h3><p class="muted">${t('Kullanıcı adını değiştirmek için hesabında e-posta olmalı. Değişiklik kodu bu adrese gönderilir.')}</p>`, [{ label: t('Vazgeç'), cls: 'sec', value: 0 }, { label: t('E-posta Ekle'), value: 1 }]); if (ok) changeEmail(); return; }
+  if (!u.emailVerified) { const ok = await modal(`<div class="big">📧</div><h3>${t('Önce e-postanı doğrula')}</h3><p class="muted">${esc(u.email)}</p>`, [{ label: t('Vazgeç'), cls: 'sec', value: 0 }, { label: t('Kod Gönder'), value: 1 }]);
+    if (ok) { const r = await api('POST', '/api/email', { email: u.email, lang: LANG }); if (r.s === 200) verifyEmailFlow(r.j.mailStatus); else toast('❌ ' + (r.j.error || '')); } return; }
+  const v = await promptModal(`<div class="big">✏️</div><h3>${t('Kullanıcı adını değiştir')}</h3><p class="muted">${t('3-16 karakter: harf, rakam, _')}. ${t('Onay kodu e-postana gönderilir. 7 günde bir değiştirebilirsin.')}</p>`, [{ id: 'nn', ph: t('Yeni kullanıcı adı'), max: 16, val: u.name }], t('Kod Gönder'));
+  if (!v) return;
+  const r = await api('POST', '/api/username/request', { newName: v.nn, lang: LANG });
+  if (r.s !== 200) { toast('❌ ' + (r.j.error || ''), 4000); return; }
+  const info = r.j.mailStatus === 'mail' ? t('Kod {0} adresine gönderildi. Gelen kutunu (ve spam klasörünü) kontrol et.', esc(r.j.email)) : t('E-posta servisi henüz kurulmamış. Kodu admin panelinden alabilirsin.');
+  const c = await promptModal(`<div class="big">📧</div><h3>${t('Kodu gir')}</h3><p class="muted">${info}</p>`, [{ id: 'cd', ph: t('6 haneli kod'), max: 6 }], t('Onayla'));
+  if (!c) return;
+  const r2 = await api('POST', '/api/username/confirm', { code: c.cd });
+  if (r2.s !== 200) { toast('❌ ' + (r2.j.error || ''), 4000); return; }
+  const oldKey = cacheKey(); AUTH.user = r2.j.user; lsDel(oldKey);
+  lsSet('mangala_auth', { token: AUTH.token, name: AUTH.user.name }); persist(); updTop(true);
+  netClose(); netConnect(); toast('✅ ' + t('Kullanıcı adın değişti: {0}', esc(AUTH.user.name))); renderProfile();
+}
+async function viewProfile(name) {
+  let r; try { r = await api('GET', '/api/profile?name=' + encodeURIComponent(name)); } catch { return toast(t('Sunucuya ulaşılamadı.')); }
+  if (r.s !== 200) return toast('❌ ' + (r.j.error || ''));
+  const p = r.j, T = p.totals, li = levelInfo(p.xp);
+  modal(`${avatarHTML(CAT.avatars[p.avatar] ? p.avatar : 'gulen', CAT.frames[p.frame] ? p.frame : 'yok', 92)}<h3 style="margin:10px 0 2px">${p.online ? '<span class="on-dot"></span>' : ''}${esc(p.name)} ${rankBadge(p.rank)}</h3>
+    <div class="ttl" style="font-size:14px">${esc(titleTxt(p.title))}</div>${p.bio ? `<p class="muted">“${esc(p.bio)}”</p>` : ''}
+    <div class="row center" style="margin:8px 0">${leagueBadge(p.elo)} <b>${p.elo}</b> Elo · <span class="badge">${t('Seviye')} ${li.L}</span></div>
+    <div class="stat-grid" style="text-align:left"><div class="stat"><b>${T.games}</b>${t('Toplam oyun')}</div><div class="stat"><b>${T.wins}</b>${t('Galibiyet')}</div>
+      <div class="stat"><b>${T.onlineWins}</b>${t('Çevrimiçi galibiyet')}</div><div class="stat"><b>${p.ranked ? p.ranked.w + 'G ' + p.ranked.l + 'M' : '-'}</b>${t('Dereceli')}</div>
+      <div class="stat"><b>${p.achs}/${ACHS.length}</b>${t('Başarımlar')}</div><div class="stat"><b>${p.tourWins}</b>${t('Turnuva zaferi')}</div></div>`, [{ label: t('Kapat'), value: 1 }]);
+}
 async function changePassword() {
   const v = await promptModal(`<div class="big">🔒</div><h3>${t('Şifre değiştir')}</h3>`,
     [{ id: 'op', ph: t('Mevcut şifre'), type: 'password' }, { id: 'np', ph: t('Yeni şifre (en az 6)'), type: 'password' }, { id: 'np2', ph: t('Yeni şifre (tekrar)'), type: 'password' }], t('Değiştir'));
@@ -257,11 +299,20 @@ function weekInfo() { const n = new Date(), tt = new Date(n.getFullYear(), n.get
   const mon = new Date(tt); mon.setDate(tt.getDate() - day); const end = new Date(mon); end.setDate(mon.getDate() + 7);
   const idx = Math.round((mon - new Date(2024, 0, 1)) / (7 * 864e5)); return { key: 'W' + idx, idx, end }; }
 const tomorrow = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1); };
-const curEvent = () => EVENTS[weekInfo().idx % EVENTS.length];
+function serverEvents() { const n = Date.now(); return (CONTENT.events || []).filter(e => e.start <= n && e.end > n).sort((a, b) => a.end - b.end); }
+function curEvent() {
+  const se = serverEvents()[0];
+  if (se) { const it = se.reward && se.reward.item; return { ...se, key: 'S' + se.id + ':' + se.start, endD: new Date(se.end), server: true,
+    reward: { coins: se.reward.coins || 0, xp: se.reward.xp || 0, item: it && CAT[it[0]] && CAT[it[0]][it[1]] ? it : null } }; }
+  const w = weekInfo(), ev = EVENTS[w.idx % EVENTS.length];
+  return { ...ev, key: w.key, endD: w.end, coinMult: ev.id === 'hazine' ? 2 : 1, xpMult: 1 };
+}
+function upcomingEvents() { const n = Date.now(); return (CONTENT.events || []).filter(e => e.start > n).sort((a, b) => a.start - b.start); }
+const rewardTxt = r => [r.item && CAT[r.item[0]] && CAT[r.item[0]][r.item[1]] ? '🎁 ' + nm(item(...r.item)) : '', r.coins ? '+' + r.coins + ' 🪙' : '', r.xp ? '+' + r.xp + ' XP' : ''].filter(Boolean).join(' · ');
 function ensurePeriods() {
   if (S.pass.season !== seasonId()) S.pass = { season: seasonId(), xp: 0, premium: false, free: [], prem: [] };
   if (S.daily.day !== dayKey()) S.daily = { day: dayKey(), prog: {}, claimed: [] };
-  const wk = weekInfo().key; if (S.event.key !== wk) S.event = { key: wk, prog: 0, claimed: false };
+  const ek = curEvent().key; if (S.event.key !== ek) S.event = { key: ek, prog: 0, claimed: false };
 }
 const dailyQuests = () => shuffled(QUESTS, 'q' + dayKey()).slice(0, 3);
 const owns = (c, id) => S.own[c].includes(id);
@@ -273,7 +324,7 @@ function updTop(bump) {
   if (bump) { const c = $('coins'); c.classList.remove('bump'); void c.offsetWidth; c.classList.add('bump'); }
   const li = levelInfo(S.xp);
   $('tb-lvl').textContent = t('Sv') + ' ' + li.L; $('tb-xp').style.width = (li.cur / li.need * 100) + '%';
-  $('tb-name').textContent = myName(); $('tb-av').innerHTML = avatarHTML(S.eq.avatar, S.eq.frame, 38);
+  $('tb-name').innerHTML = esc(myName()) + (AUTH.user && AUTH.user.rank ? ` <span class="rk-i" title="${esc(nm(AUTH.user.rank))}">${AUTH.user.rank.icon || '★'}</span>` : ''); $('tb-av').innerHTML = avatarHTML(S.eq.avatar, S.eq.frame, 38);
   const can = S.tutorialDone && S.login.last !== dayKey();
   const db = $('dailybtn'); db.classList.toggle('glow', can); db.innerHTML = '🎁' + (can || hasClaimables() ? '<span class="dot"></span>' : '');
   $('musicbtn').textContent = S.music ? '🎵' : '🔇';
@@ -420,7 +471,7 @@ function floater(wrap, i, text, color) {
 const vib = p => { if (S.haptics && navigator.vibrate) try { navigator.vibrate(p); } catch { } };
 
 /* ---------- el animasyonu ---------- */
-const SPEEDS = { slow: 440, normal: 300, fast: 160 };
+const SPEEDS = { slow: 640, normal: 440, fast: 250 };
 function makeHand(wrap, p, handId) {
   const layer = wrap.querySelector('.handlayer');
   const pal = (CAT.stones[S.eq.stone] || CAT.stones.renkli).colors;
@@ -599,26 +650,41 @@ function refreshBoards() { if (curScreen === 'tutorial') tutRender(); else if (c
 
 /* ---------- Menü ---------- */
 RENDER.menu = () => {
-  const tt = passTier(), ev = curEvent(), wk = weekInfo();
+  const tt = passTier(), ev = curEvent(), ui = CONTENT.ui || {}, hidden = new Set(ui.hidden || []);
   const dq = dailyQuests(), dDone = dq.filter(q => (S.daily.prog[q.id] || 0) >= q.goal).length;
   const solved = Object.keys(S.puzzles).length;
-  $('scr-menu').innerHTML = `<div class="hero"><h1>MANGALA</h1><p>${t('Binlerce yıllık Türk zekâ ve strateji oyunu')}</p></div>
+  const tiles = [
+    ['pass', `<button class="mcard pass" onclick="go('pass')"><span class="note">${S.pass.premium ? '👑' : t('ÜCRETSİZ')}</span><div class="ic">🎫</div><h3>${t('Sezon Kartı')}</h3><p>${t('{0} Sezonu', seasonName())} · ${tt}/${PASS_TIERS}</p><div class="mini-prog"><i style="width:${tt / PASS_TIERS * 100}%"></i></div></button>`],
+    ['event', `<button class="mcard event" onclick="go('events')"><span class="note">${t('SINIRLI SÜRE')}</span><div class="ic">${ev.icon}</div><h3>${esc(nm(ev))}</h3><p>${Math.min(S.event.prog, ev.goal)}/${ev.goal} · ${until(ev.endD)}</p></button>`],
+    ['quests', `<button class="mcard" onclick="go('events')"><span class="note">${dDone}/3</span><div class="ic">📋</div><h3>${t('Görevler')}</h3><p>${t('Günlük görevler ve ödüller')}</p></button>`],
+    ['puzzles', `<button class="mcard" onclick="go('puzzles')"><span class="note">${solved}/${PUZZLES.length}</span><div class="ic">🧩</div><h3>${t('Bulmacalar')}</h3><p>${t('Taktik görevleri çöz')}</p></button>`],
+    ['shop', `<button class="mcard" onclick="go('shop')"><div class="ic">🛒</div><h3>${t('Mağaza')}</h3><p>${t('Tahta, taş, el, avatar, emoji...')}</p></button>`],
+    ['profile', `<button class="mcard" onclick="go('profile')"><div class="ic">👤</div><h3>${t('Profil')}</h3><p>${t('Başarımlar, unvanlar, hesap')}</p></button>`],
+    ['replay', `<button class="mcard" onclick="openReplays()"><div class="ic">🎬</div><h3>${t('Maç Tekrarları')}</h3><p>${t('Tekrar izle ve koç analizi')}</p></button>`],
+    ['rules', `<button class="mcard" onclick="go('rules')"><div class="ic">📜</div><h3>${t('Kurallar')}</h3><p>${t('Tüm kurallar ve modlar')}</p></button>`],
+    ['settings', `<button class="mcard" onclick="go('settings')"><div class="ic">⚙️</div><h3>${t('Ayarlar')}</h3><p>${t('Dil, ses, müzik, titreşim')}</p></button>`]
+  ].filter(([k]) => !hidden.has(k)).map(x => x[1]).join('');
+  $('scr-menu').innerHTML = `<div class="hero"><h1>${esc((ui.hero && ui.hero.title) || 'MANGALA')}</h1><p>${esc((ui.hero && ui.hero.sub) || t('Binlerce yıllık Türk zekâ ve strateji oyunu'))}</p></div>
     <div class="preview"><div class="bwrap"><div id="mboard" class="board"></div></div></div>
+    ${uiBlocksHTML(ui.blocks || [])}
     <div class="menu-grid">
       <button class="mcard main" onclick="go('mode')"><div class="ic">⚔️</div><h3>${t('OYNA')}</h3><p>${t('Botlar, çevrimiçi, dereceli, turnuva')}</p></button>
-      <button class="mcard pass" onclick="go('pass')"><span class="note">${S.pass.premium ? '👑' : t('ÜCRETSİZ')}</span><div class="ic">🎫</div><h3>${t('Sezon Kartı')}</h3><p>${t('{0} Sezonu', seasonName())} · ${tt}/${PASS_TIERS}</p><div class="mini-prog"><i style="width:${tt / PASS_TIERS * 100}%"></i></div></button>
-      <button class="mcard event" onclick="go('events')"><span class="note">${t('SINIRLI SÜRE')}</span><div class="ic">${ev.icon}</div><h3>${nm(ev)}</h3><p>${Math.min(S.event.prog, ev.goal)}/${ev.goal} · ${until(wk.end)}</p></button>
-      <button class="mcard" onclick="go('events')"><span class="note">${dDone}/3</span><div class="ic">📋</div><h3>${t('Görevler')}</h3><p>${t('Günlük görevler ve ödüller')}</p></button>
-      <button class="mcard" onclick="go('puzzles')"><span class="note">${solved}/${PUZZLES.length}</span><div class="ic">🧩</div><h3>${t('Bulmacalar')}</h3><p>${t('Taktik görevleri çöz')}</p></button>
-      <button class="mcard" onclick="go('shop')"><div class="ic">🛒</div><h3>${t('Mağaza')}</h3><p>${t('Tahta, taş, el, avatar, emoji...')}</p></button>
-      <button class="mcard" onclick="go('profile')"><div class="ic">👤</div><h3>${t('Profil')}</h3><p>${t('Başarımlar, unvanlar, hesap')}</p></button>
-      <button class="mcard" onclick="openReplays()"><div class="ic">🎬</div><h3>${t('Maç Tekrarları')}</h3><p>${t('Tekrar izle ve koç analizi')}</p></button>
-      <button class="mcard" onclick="go('rules')"><div class="ic">📜</div><h3>${t('Kurallar')}</h3><p>${t('Tüm kurallar ve modlar')}</p></button>
-      <button class="mcard" onclick="go('settings')"><div class="ic">⚙️</div><h3>${t('Ayarlar')}</h3><p>${t('Dil, ses, müzik, titreşim')}</p></button>
-      ${isAdmin() ? `<button class="mcard admin" onclick="go('admin')"><div class="ic">🛡️</div><h3>${t('Admin Paneli')}</h3><p>${t('Oyuncular, ban, para, duyuru')}</p></button>` : ''}
+      ${tiles}
+      ${can('panel') ? `<button class="mcard admin" onclick="go('admin')"><div class="ic">${AUTH.user.rank ? AUTH.user.rank.icon : '🛡️'}</div><h3>${t('Yönetim Paneli')}</h3><p>${esc(nm(AUTH.user.rank))} · ${t('yetkilerine göre')}</p></button>` : ''}
     </div>`;
   renderBoard($('mboard'), INIT, { labels: false, layout: 'h' });
 };
+/* ---------- kurucunun hazır bileşenleri ---------- */
+function uiBlocksHTML(blocks) { return blocks && blocks.length ? `<div class="ublocks">${blocks.map(uiBlockHTML).join('')}</div>` : ''; }
+function uiBlockHTML(b) {
+  const go2 = b.target ? `onclick="go('${b.target}')"` : '';
+  if (b.type === 'banner') return `<div class="ub ub-${b.color} ub-banner">${b.icon ? `<div class="ub-ic">${esc(b.icon)}</div>` : ''}<div class="ub-body"><h3>${esc(b.title)}</h3>${b.text ? `<p>${esc(b.text)}</p>` : ''}</div>${b.target ? `<button class="btn sm" ${go2}>${esc(b.btn || t('Git'))}</button>` : ''}</div>`;
+  if (b.type === 'news') return `<div class="ub ub-${b.color} ub-news"><b>${esc(b.icon || '📰')} ${esc(b.title)}</b>${b.text ? `<p>${esc(b.text)}</p>` : ''}${b.target ? `<button class="linkbtn" ${go2}>${esc(b.btn || t('Git'))} →</button>` : ''}</div>`;
+  if (b.type === 'countdown') return `<div class="ub ub-${b.color} ub-count"><div><b>${esc(b.icon || '⏳')} ${esc(b.title)}</b>${b.text ? `<p>${esc(b.text)}</p>` : ''}</div>${b.date > Date.now() ? `<span class="ub-timer" data-until="${b.date}">${fmtLeft(b.date - Date.now())}</span>` : `<span class="ub-timer">${t('Başladı!')}</span>`}</div>`;
+  if (b.type === 'event') { const e = curEvent(); return `<div class="ub ub-${b.color} ub-banner"><div class="ub-ic">${e.icon}</div><div class="ub-body"><h3>${esc(b.title || nm(e))}</h3><p>${dsc(e)}</p><div class="mini-prog"><i style="width:${Math.min(1, S.event.prog / e.goal) * 100}%"></i></div></div><button class="btn sm" onclick="go('events')">${esc(b.btn || t('Etkinliğe Git'))}</button></div>`; }
+  if (b.type === 'buttons') return `<div class="ub ub-${b.color} ub-btns">${b.title ? `<b>${esc(b.title)}</b>` : ''}<div class="row">${(b.buttons || []).map(x => `<button class="btn sm" onclick="go('${x.target}')">${esc(x.icon || '')} ${esc(x.label)}</button>`).join('')}</div></div>`;
+  return '';
+}
 async function openDaily() {
   if (!S.tutorialDone) return;
   ensurePeriods();
@@ -638,8 +704,9 @@ function dailyDeals() {
   const pool = []; for (const c of ['boards', 'stones', 'hands', 'avatars', 'frames', 'emojis', 'msgs']) for (const [id, it] of Object.entries(CAT[c])) if (it.price > 0 && !it.src) pool.push([c, id]);
   return shuffled(pool, 'deal' + dayKey()).slice(0, 3).map(([c, id], k) => ({ c, id, off: [30, 40, 50][k] }));
 }
-function priceOf(c, id) { const it = item(c, id); const d = dailyDeals().find(x => x.c === c && x.id === id); return d ? Math.round(it.price * (100 - d.off) / 100) : it.price; }
-function canBuy(c, id) { const it = item(c, id); if (!it.price) return false; if (!it.src) return true; return it.src === 'event:' + curEvent().id; }
+const evShop = (c, id) => (curEvent().shop || []).find(x => x[0] === c && x[1] === id);
+function priceOf(c, id) { const it = item(c, id), es = evShop(c, id); if (es && es[2] != null) return es[2]; const d = dailyDeals().find(x => x.c === c && x.id === id); return d ? Math.round(it.price * (100 - d.off) / 100) : it.price; }
+function canBuy(c, id) { const it = item(c, id); if (evShop(c, id)) return true; if (!it.price) return false; if (!it.src) return true; return it.src === 'event:' + curEvent().id; }
 function previewHTML(c, id) {
   const it = item(c, id), pal = CAT.stones[S.eq.stone].colors;
   if (c === 'boards') return `<div class="board mini ${it.cls}"><div class="store">${stonesHTML(1, 5, true, pal)}</div>${[3, 4, 2].map((n, k) => `<div class="pit">${stonesHTML(k, n, false, pal)}</div>`).join('')}<div class="store">${stonesHTML(4, 7, true, pal)}</div></div>`;
@@ -668,9 +735,9 @@ RENDER.shop = () => {
   if (shopCur === 'featured') {
     const ev = curEvent();
     h += `<div class="sec-title"><h3>🔥 ${t('Günün Fırsatları')}</h3>${until(tomorrow())}</div><div class="items">${dailyDeals().map(d => itemCard(d.c, d.id, { ribbon: '-%' + d.off })).join('')}</div>
-      <div class="sec-title"><h3>${ev.icon} ${t('Etkinlik Özel')}: ${nm(ev)}</h3>${until(weekInfo().end)}</div>
-      <div class="items">${ev.shop.map(([c, id]) => itemCard(c, id, { ribbon: t('SINIRLI'), ev: true })).join('')}
-        <div class="card item" style="justify-content:center;text-align:center"><div style="font-size:46px">${ev.icon}</div><h4>${t('Etkinlik ödülü')}</h4><p class="muted small" style="margin:0">${nm(item(...ev.reward.item))} + ${ev.reward.coins} 🪙</p><button class="btn sec sm" onclick="go('events')">${t('Etkinliğe Git')}</button></div></div>
+      <div class="sec-title"><h3>${ev.icon} ${t('Etkinlik Özel')}: ${esc(nm(ev))}</h3>${until(ev.endD)}</div>
+      <div class="items">${(ev.shop || []).filter(([c, id]) => CAT[c] && CAT[c][id]).map(([c, id]) => itemCard(c, id, { ribbon: t('SINIRLI'), ev: true })).join('')}
+        <div class="card item" style="justify-content:center;text-align:center"><div style="font-size:46px">${ev.icon}</div><h4>${t('Etkinlik ödülü')}</h4><p class="muted small" style="margin:0">${rewardTxt(ev.reward)}</p><button class="btn sec sm" onclick="go('events')">${t('Etkinliğe Git')}</button></div></div>
       <div class="sec-title"><h3>🎫 ${t('Sezon Kartı')}</h3>${until(seasonEnd())}</div>
       <div class="card row" style="background:linear-gradient(135deg,#5b3a8a,#2e1b4a);border-color:#8f6ad6"><div style="font-size:46px">👑</div><div style="flex:1;min-width:200px"><h3 style="margin:0">${t('Altın Bilet')}</h3><p class="muted" style="margin:4px 0 0">${t('Ejderha tahtası, Alev çerçeve, Ejder Pençesi eli ve çok daha fazlası!')}</p></div><button class="btn purple" onclick="go('pass')">${t('İncele')}</button></div>`;
   } else {
@@ -739,14 +806,17 @@ async function buyPass() {
 /* ---------- Etkinlik & görevler ---------- */
 RENDER.events = () => {
   ensurePeriods();
-  const ev = curEvent(), wk = weekInfo(), done = S.event.prog >= ev.goal, [rc, rid] = ev.reward.item, nextEv = EVENTS[(wk.idx + 1) % EVENTS.length];
+  const ev = curEvent(), done = S.event.prog >= ev.goal, up = upcomingEvents(), r = ev.reward, ri = r.item;
+  const w = weekInfo(), nextBuiltin = EVENTS[(w.idx + 1) % EVENTS.length];
+  const mult = [ev.coinMult > 1 ? '🪙 x' + ev.coinMult : '', ev.xpMult > 1 ? '⭐ XP x' + ev.xpMult : ''].filter(Boolean);
   $('scr-events').innerHTML = `<button class="btn sec sm back" onclick="go('menu')">← ${t('Menü')}</button><h2>🎊 ${t('Etkinlikler & Görevler')}</h2>
     <div class="ev-big"><div class="ic">${ev.icon}</div>
-      <div style="flex:1;min-width:220px"><div class="row"><span class="badge">${t('HAFTALIK ETKİNLİK')}</span>${until(wk.end)}</div><h2 style="margin:8px 0 4px">${nm(ev)}</h2><p class="muted" style="margin:0 0 10px">${dsc(ev)}</p>
+      <div style="flex:1;min-width:220px"><div class="row"><span class="badge">${ev.server ? t('ÖZEL ETKİNLİK') : t('HAFTALIK ETKİNLİK')}</span>${until(ev.endD)}${mult.map(m => `<span class="badge">${m}</span>`).join('')}</div><h2 style="margin:8px 0 4px">${esc(nm(ev))}</h2><p class="muted" style="margin:0 0 10px">${dsc(ev)}</p>
       <div class="pbar-g"><i style="width:${Math.min(1, S.event.prog / ev.goal) * 100}%"></i></div><div style="margin-top:6px;font-weight:800">${Math.min(S.event.prog, ev.goal)} / ${ev.goal}</div></div>
-      <div class="card" style="text-align:center;min-width:160px"><div class="muted small">${t('Ödül')}</div><div style="max-width:150px;margin:6px auto">${previewHTML(rc, rid)}</div><b>${nm(item(rc, rid))}</b><div>+${ev.reward.coins} 🪙</div>
+      <div class="card" style="text-align:center;min-width:160px"><div class="muted small">${t('Ödül')}</div><div style="max-width:150px;margin:6px auto">${ri ? previewHTML(ri[0], ri[1]) : '<div style="font-size:54px">🎁</div>'}</div><b>${rewardTxt(r)}</b>
         <div style="margin-top:8px">${S.event.claimed ? `<span class="badge">✓ ${t('Alındı')}</span>` : `<button class="btn sm ${done ? '' : 'sec'}" ${done ? '' : 'disabled'} onclick="claimEvent()">${done ? t('Ödülü Al') : t('Devam et')}</button>`}</div></div></div>
-    <p class="muted small">${t('Sıradaki etkinlik')}: ${nextEv.icon} <b>${nm(nextEv)}</b></p>
+    ${up.length ? `<div class="sec-title"><h3>📅 ${t('Yakındaki etkinlikler')}</h3></div><div class="list">${up.slice(0, 5).map(e => `<div class="lrow"><span style="font-size:26px">${esc(e.icon)}</span><div class="grow"><b>${esc(nm(e))}</b><span class="muted small">${esc(dsc(e))}</span></div>${until(new Date(e.start))}</div>`).join('')}</div>`
+      : `<p class="muted small">${t('Sıradaki etkinlik')}: ${nextBuiltin.icon} <b>${nm(nextBuiltin)}</b></p>`}
     <div class="sec-title"><h3>📋 ${t('Günlük Görevler')}</h3>${until(tomorrow())}</div>
     <div class="card">${dailyQuests().map(q => { const p = Math.min(S.daily.prog[q.id] || 0, q.goal), cl = S.daily.claimed.includes(q.id), ok = p >= q.goal;
       return `<div class="quest"><div style="font-size:26px">${ok ? '✅' : '🎯'}</div><div class="q-txt"><b>${LANG === 'en' ? q.en : q.txt}</b> <span class="muted small">· ${QUEST_REWARD.coins} 🪙 + ${QUEST_REWARD.xp} XP</span><div class="pbar-g"><i style="width:${p / q.goal * 100}%"></i></div></div><div style="min-width:80px;text-align:right">${cl ? `<span class="badge">✓</span>` : `<button class="btn xs ${ok ? '' : 'sec'}" ${ok ? '' : 'disabled'} onclick="claimQuest('${q.id}')">${ok ? t('Al') : p + '/' + q.goal}</button>`}</div></div>`; }).join('')}</div>
@@ -764,14 +834,14 @@ function renderProfile() {
   const acct = AUTH.guest ? `<div class="card" style="border-color:var(--gold)"><h3 style="margin-top:0">👤 ${t('Misafir hesabı')}</h3><p class="muted">${t('İlerlemen sadece bu cihazda. Hesap oluşturursan her cihazdan giriş yapabilirsin ve ilerlemen aktarılır.')}</p>
       <div class="row"><input class="inp" id="pname" maxlength="16" value="${esc(S.name)}" style="max-width:220px"><button class="btn sm sec" onclick="saveName()">${t('İsmi Kaydet')}</button><button class="btn sm" onclick="logout()">${t('Hesap Oluştur / Giriş')}</button></div></div>`
     : `<div class="card"><h3 style="margin-top:0">🔐 ${t('Hesap')}</h3>
-      <div class="set-row"><span>${t('Kullanıcı adı')}</span><b>${esc(u.name)} ${isAdmin() ? '<span class="badge">ADMIN</span>' : ''}</b></div>
+      <div class="set-row"><span>${t('Kullanıcı adı')}</span><span><b>${esc(u.name)}</b> ${rankBadge(u.rank)} <button class="btn xs sec" onclick="changeUsername()">✏️ ${t('Değiştir')}</button></span></div>
       <div class="set-row"><span>${t('E-posta')}</span><span>${u.email ? esc(u.email) + ' ' + (u.emailVerified ? '<span class="okmsg">✓ ' + t('doğrulandı') + '</span>' : `<button class="linkbtn" onclick="verifyEmailFlow()">${t('doğrula')}</button>`) : '<span class="muted">' + t('yok') + '</span>'} <button class="btn xs sec" onclick="changeEmail()">${u.email ? t('Değiştir') : t('Ekle')}</button></span></div>
       <div class="set-row"><span>${t('Dereceli')}</span><span>${leagueBadge(u.elo)} <b>${u.elo}</b> Elo · ${u.ranked ? `${u.ranked.w}G ${u.ranked.d}B ${u.ranked.l}M` : ''}</span></div>
       <div class="row" style="margin-top:12px"><button class="btn sm sec" onclick="changePassword()">🔒 ${t('Şifre Değiştir')}</button><button class="btn sm red" onclick="logout()">🚪 ${t('Çıkış Yap')}</button></div></div>`;
   const unlocked = ACHS.filter(a => S.achs[a.id]).length;
   $('scr-profile').innerHTML = `<button class="btn sec sm back" onclick="go('menu')">← ${t('Menü')}</button><h2>👤 ${t('Profil')}</h2>
     <div class="card prof-head">${avatarHTML(S.eq.avatar, S.eq.frame, 104)}
-      <div style="flex:1;min-width:200px"><h2 style="margin:0">${esc(myName())}</h2><div class="ttl" style="font-size:14px">${titleTxt(S.title)}</div>
+      <div style="flex:1;min-width:200px"><h2 style="margin:0">${esc(myName())} ${AUTH.user ? rankBadge(AUTH.user.rank) : ''}</h2><div class="ttl" style="font-size:14px">${titleTxt(S.title)}</div><input class="inp" id="pbio" maxlength="80" placeholder="${t('Durum mesajı (profilinde herkes görür)')}" value="${esc(S.bio || '')}" onchange="S.bio=this.value.replace(/[<>]/g,'').slice(0,80);persist();toast('✓')" style="margin-top:8px;max-width:380px">
         <div class="row" style="margin-top:8px"><span class="badge" style="font-size:14px">${t('Seviye')} ${li.L}</span><span class="muted">${li.cur}/${li.need} XP</span></div>
         <div class="pbar-g" style="margin-top:6px;max-width:320px"><i style="width:${li.cur / li.need * 100}%;background:linear-gradient(90deg,#7bd3ff,#4b8df8)"></i></div></div></div>
     <div style="margin-top:12px">${acct}</div>
@@ -821,55 +891,6 @@ async function resetGuest() {
   const ok = await modal(`<div class="big">⚠️</div><h3>${t('Emin misin?')}</h3><p>${t('Tüm misafir ilerlemen silinecek.')}</p>`, [{ label: t('Vazgeç'), cls: 'sec', value: false }, { label: t('Sıfırla'), cls: 'red', value: true }]);
   if (!ok) return; lsDel('mangala_guest_v3'); S = normalize({}); persist(); go('tutorial');
 }
-
-/* =========================================================
-   ADMIN PANELİ
-   ========================================================= */
-let admQ = '', admPage = 0;
-RENDER.admin = async () => {
-  if (!isAdmin()) return go('menu');
-  const el = $('scr-admin');
-  el.innerHTML = `<button class="btn sec sm back" onclick="go('menu')">← ${t('Menü')}</button><h2>🛡️ ${t('Admin Paneli')}</h2><div class="spinner"></div>`;
-  let st, us;
-  try { [st, us] = await Promise.all([api('GET', '/api/admin/stats'), api('GET', `/api/admin/users?q=${encodeURIComponent(admQ)}&page=${admPage}`)]); }
-  catch { el.innerHTML += `<p class="err">${t('Sunucuya ulaşılamadı.')}</p>`; return; }
-  if (st.s !== 200) { el.innerHTML += `<p class="err">${esc(st.j.error || '')}</p>`; return; }
-  const s = st.j, U = us.j.users || [];
-  const fmt = ms => ms ? new Date(ms).toLocaleString(LANG === 'en' ? 'en-GB' : 'tr-TR', { dateStyle: 'short', timeStyle: 'short' }) : '-';
-  el.innerHTML = `<button class="btn sec sm back" onclick="go('menu')">← ${t('Menü')}</button><h2>🛡️ ${t('Admin Paneli')}</h2>
-    <div class="stat-grid"><div class="stat"><b>${s.users}</b>${t('Kayıtlı oyuncu')}</div><div class="stat"><b>${s.online}</b>${t('Şu an bağlı')}</div><div class="stat"><b>${s.rooms}</b>${t('Canlı maç')}</div>
-      <div class="stat"><b>${s.tours}</b>${t('Turnuva')}</div><div class="stat"><b>${s.db === 'mongo' ? '✅ MongoDB' : '⚠️ ' + t('Dosya')}</b>${t('Veritabanı')}</div><div class="stat"><b>${s.mail ? '✅' : '⚠️ ' + t('Kapalı')}</b>${t('E-posta servisi')}</div></div>
-    ${s.db !== 'mongo' ? `<p class="small" style="color:var(--gold)">⚠️ ${t('Veritabanı dosyada: ücretsiz Render sunucusu yeniden başlarsa hesaplar silinir. KURULUM.md\'deki MongoDB adımını yap.')}</p>` : ''}
-    ${s.codes && s.codes.length ? `<div class="sec-title"><h3>📧 ${t('Bekleyen e-posta kodları')}</h3></div><div class="card"><p class="muted small" style="margin-top:0">${t('E-posta servisi kurulu olmadığı için kodlar burada görünür. Oyuncuya kodu sen ilet.')}</p>${s.codes.map(c => `<div class="lrow"><div class="grow"><b>${esc(c.user)} · ${c.kind === 'reset' ? t('Şifre sıfırlama') : t('E-posta doğrulama')}</b><span class="muted small">${esc(c.email)} · ${t('{0} dk kaldı', c.left)}</span></div><b style="font-size:22px;letter-spacing:4px;color:var(--gold)">${c.code}</b></div>`).join('')}</div>` : ''}
-    <div class="sec-title"><h3>📢 ${t('Duyuru gönder')}</h3></div>
-    <div class="card row"><input class="inp" id="adm-ann" maxlength="200" placeholder="${t('Tüm bağlı oyunculara mesaj...')}" style="flex:1;min-width:200px"><button class="btn sm" onclick="admAct('announce',{msg:$('adm-ann').value})">${t('Gönder')}</button></div>
-    <div class="sec-title"><h3>👥 ${t('Oyuncular')} (${us.j.total || 0})</h3><div class="row"><input class="inp" id="adm-q" placeholder="${t('Ara...')}" value="${esc(admQ)}" style="width:180px"><button class="btn sm sec" onclick="admQ=$('adm-q').value.trim().toLowerCase();admPage=0;RENDER.admin()">🔍</button></div></div>
-    <div class="card tscroll"><table class="atable"><tr><th>${t('Oyuncu')}</th><th>🪙</th><th>Elo</th><th>${t('Son giriş')}</th><th>${t('Durum')}</th><th>${t('İşlemler')}</th></tr>
-      ${U.map(u => `<tr><td>${u.online ? '<span class="on-dot"></span>' : ''}<b>${esc(u.name)}</b>${u.role === 'admin' ? ' <span class="badge">ADMIN</span>' : ''}<br><span class="muted small">${esc(u.email || '-')}${u.emailVerified ? ' ✓' : ''}</span></td>
-        <td>${u.role === 'admin' ? '∞' : u.coins}</td><td>${u.elo}</td><td class="small">${fmt(u.lastLogin)}</td>
-        <td>${u.banned ? `<span class="ban">⛔ ${u.banned.until ? fmt(u.banned.until) : t('süresiz')}</span>` : '<span class="okmsg">✓</span>'}</td>
-        <td><div class="row" style="flex-wrap:nowrap;gap:4px">${u.role !== 'admin' || u.name.toLowerCase() !== 'admin' ? `
-          <button class="btn xs" title="${t('Para ver')}" onclick="admCoins('${esc(u.name)}')">🪙</button>
-          ${u.banned ? `<button class="btn xs green" title="${t('Banı kaldır')}" onclick="admAct('unban',{username:'${esc(u.name)}'})">✅</button>` : `<button class="btn xs red" title="${t('Banla')}" onclick="admBan('${esc(u.name)}')">⛔</button>`}
-          <button class="btn xs sec" title="${t('Sunucudan at')}" onclick="admAct('kick',{username:'${esc(u.name)}'})">👢</button>
-          <button class="btn xs sec" title="${t('Şifre belirle')}" onclick="admPw('${esc(u.name)}')">🔑</button>
-          <button class="btn xs sec" title="${t('İlerlemeyi sıfırla')}" onclick="admConfirm('resetprogress','${esc(u.name)}')">♻️</button>
-          <button class="btn xs sec" title="${u.role === 'admin' ? t('Adminliği al') : t('Admin yap')}" onclick="admAct('role',{username:'${esc(u.name)}',role:'${u.role === 'admin' ? 'user' : 'admin'}'})">${u.role === 'admin' ? '⬇️' : '⭐'}</button>
-          <button class="btn xs red" title="${t('Hesabı sil')}" onclick="admConfirm('delete','${esc(u.name)}')">🗑️</button>` : ''}</div></td></tr>`).join('')}</table>
-      <div class="row center" style="margin-top:10px"><button class="btn xs sec" ${admPage ? '' : 'disabled'} onclick="admPage--;RENDER.admin()">◀</button><span class="muted">${admPage + 1}</span><button class="btn xs sec" ${(admPage + 1) * 25 < us.j.total ? '' : 'disabled'} onclick="admPage++;RENDER.admin()">▶</button></div></div>
-    <div class="sec-title"><h3>🎮 ${t('Canlı maçlar')}</h3><button class="btn xs sec" onclick="RENDER.admin()">🔄</button></div><div id="adm-rooms" class="list"></div>`;
-  const rr = await api('GET', '/api/admin/rooms');
-  $('adm-rooms').innerHTML = (rr.j.rooms || []).map(r => `<div class="lrow"><div class="grow"><b>${esc(r.names[0])} ${r.scores[0]} – ${r.scores[1]} ${esc(r.names[1])}</b><span class="muted small">${nm(MODES[r.mode])} · ${r.qmode} · ${r.code}${r.specs ? ' · 👁️ ' + r.specs : ''}</span></div>
-    <button class="btn xs sec" onclick="spectate('${r.code}')">👁️</button><button class="btn xs red" onclick="admAct('closeroom',{code:'${r.code}'})">✖</button></div>`).join('') || `<p class="muted">${t('Şu an maç yok.')}</p>`;
-};
-async function admAct(a, body) { const { s, j } = await api('POST', '/api/admin/' + a, body); toast(s === 200 ? '✅ ' + t('Tamam') : '❌ ' + (j.error || '')); if (curScreen === 'admin') RENDER.admin(); }
-async function admCoins(name) { const v = await promptModal(`<div class="big">🪙</div><h3>${esc(name)}</h3><p class="muted">${t('Eklenecek miktar (eksi yazarsan düşer)')}</p>`, [{ id: 'amt', ph: '500', type: 'number' }], t('Gönder')); if (v && v.amt) admAct('coins', { username: name, amount: +v.amt }); }
-async function admBan(name) {
-  const v = await promptModal(`<div class="big">⛔</div><h3>${t('{0} banlansın mı?', esc(name))}</h3><p class="muted">${t('Süre dakika olarak (0 = süresiz). 1 gün = 1440')}</p>`, [{ id: 'min', ph: '0', type: 'number', val: '1440' }, { id: 'rsn', ph: t('Sebep (isteğe bağlı)') }], t('Banla'));
-  if (v) admAct('ban', { username: name, minutes: +v.min || 0, reason: v.rsn });
-}
-async function admPw(name) { const v = await promptModal(`<div class="big">🔑</div><h3>${esc(name)}</h3>`, [{ id: 'pw', ph: t('Yeni şifre (en az 6)') }], t('Kaydet')); if (v) admAct('setpw', { username: name, password: v.pw }); }
-async function admConfirm(a, name) { const ok = await modal(`<div class="big">⚠️</div><h3>${esc(name)}</h3><p>${a === 'delete' ? t('Hesap kalıcı olarak silinecek.') : t('Tüm ilerlemesi sıfırlanacak.')}</p>`, [{ label: t('Vazgeç'), cls: 'sec', value: false }, { label: t('Onayla'), cls: 'red', value: true }]); if (ok) admAct(a, { username: name }); }
 
 /* =========================================================
    EĞİTİM
