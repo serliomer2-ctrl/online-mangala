@@ -30,6 +30,7 @@ const RENAME_COOLDOWN_DAYS = 7;
 const MAX_MSG_PER_SEC = 30;
 const EMOTE_COOLDOWN_MS = 1500;
 const SESSION_DAYS = 30;
+const RECONNECT_MS = 30000;          // bağlantısı kopan oyuncunun maça dönmek için süresi
 // ------------------------------------------
 
 const LEAGUES = [{ id: 'bronz', min: 0 }, { id: 'gumus', min: 1100 }, { id: 'altin', min: 1300 }, { id: 'elmas', min: 1500 }, { id: 'usta', min: 1700 }];
@@ -305,7 +306,8 @@ const api = {
       banned: isBanned(u) ? u.banned : null, muted: u.muted && (u.muted === -1 || u.muted > now()) ? u.muted : 0, warns: u.warns || [], elo: u.elo, ranked: u.ranked, created: u.created,
       lastLogin: u.lastLogin, online: userSockets.has(u.key), coins: sv.coins || 0, xp: sv.xp || 0, totals: sv.totals || {}, achs: Object.keys(sv.achs || {}).length,
       items: Object.values(sv.own || {}).reduce((x, y) => x + (Array.isArray(y) ? y.length : 0), 0), bots: sv.bots || [], tutorialDone: !!sv.tutorialDone,
-      self: u.key === a.key, canAct: u.key === a.key || (u.role !== ST.FOUNDER && ST.level(u) < ST.level(a)) }];
+      self: u.key === a.key, canAct: u.key === a.key || (u.role !== ST.FOUNDER && ST.level(u) < ST.level(a)),
+      assignable: ST.ranks.filter(r => r.id !== ST.FOUNDER && (a.role === ST.FOUNDER || r.level < ST.level(a))).map(r => ({ id: r.id, name: r.name, en: r.en, icon: r.icon, color: r.color, level: r.level })) }];
   },
   'POST /api/admin/ban': act('ban', async (a, u, b) => {
     if (u.key === a.key) return [400, { error: 'Kendini yasaklayamazsın.' }];
@@ -374,6 +376,7 @@ const api = {
     const role = String(b.role || 'user');
     const r = role === 'user' ? { level: 0 } : ST.ranks.find(x => x.id === role);
     if (!r || role === ST.FOUNDER) return [400, { error: 'Bu rank verilemez.' }];
+    if ((u.role || 'user') === role) return [400, { error: 'Oyuncu zaten bu rankta.' }];
     if (u.key === a.key) return [400, { error: 'Kendi rankını değiştiremezsin.' }];
     if (a.role !== ST.FOUNDER && r.level >= ST.level(a)) return [403, { error: 'Sadece kendinden düşük rankları verebilirsin.' }];
     u.role = role; await db.saveUser(u);
@@ -478,11 +481,12 @@ function startRoom(room, keepFirst) {
   room.first = keepFirst != null ? keepFirst : room.first == null ? crypto.randomInt(2) : 1 - room.first;
   room.st = E.newState(room.mode, seed, room.first);
   room.over = false; room.rematch = new Set(); room.actions = []; room.startAt = now();
+  room.rt = [crypto.randomBytes(12).toString('hex'), crypto.randomBytes(12).toString('hex')]; room.dc = [null, null];
   room.turnMs = room.mode === 'blitz' ? BLITZ_MS : TURN_MS;
   room.players.forEach((ws, i) => {
     ws.room = room.code; ws.seat = i;
     sendWs(ws, { t: 'start', you: i, mode: room.mode, qmode: room.qmode, st: view(room.st, i), opp: room.players[1 - i].profile, turnMs: room.turnMs,
-      room: room.code, ranked: !!room.ranked, tour: room.tour ? { id: room.tour.id } : null });
+      room: room.code, ranked: !!room.ranked, tour: room.tour ? { id: room.tour.id } : null, rt: room.rt[i] });
   });
   for (const s of room.specs) sendSpecStart(s, room);
   armTimer(room);
@@ -516,7 +520,7 @@ function applyAct(room, seat, act, auto = false) {
 }
 async function finish(room, winnerSeat, reason) {
   if (room.over) return;
-  room.over = true; clearTimeout(room.timer);
+  room.over = true; clearTimeout(room.timer); (room.dc || []).forEach(t => t && clearTimeout(t));
   let elo = [null, null];
   if (room.ranked && reason !== 'admin') elo = await rankedResult(room, winnerSeat);
   room.players.forEach((ws, i) => sendWs(ws, { t: 'over', res: winnerSeat === -1 ? 'draw' : winnerSeat === i ? 'win' : 'loss', reason, st: view(room.st, i), elo: elo[i] }));
@@ -554,6 +558,33 @@ function leaveRoom(ws, reason = 'left') {
     for (const s of room.specs) { sendWs(s, { t: 'specEnd' }); s.spectating = null; }
     rooms.delete(room.code);
   }
+}
+// bağlantı koptu: hemen hükmen yenik sayma, 30 sn bekle
+function softLeave(ws) {
+  const room = rooms.get(ws.room);
+  if (!room || room.over || !room.players[1] || room.players.indexOf(ws) === -1) return false;
+  const seat = room.players.indexOf(ws), other = room.players[1 - seat];
+  if (room.dc && room.dc[seat]) return true;
+  sendWs(other, { t: 'oppDc', secs: RECONNECT_MS / 1000 });
+  room.dc[seat] = setTimeout(() => { room.dc[seat] = null; if (!room.over && room.players[seat] === ws) { ws.room = ws.room || room.code; leaveRoom(ws, 'left'); } }, RECONNECT_MS);
+  return true;
+}
+function resumeSeat(ws, code, rt) {
+  const room = rooms.get(String(code || '').toUpperCase());
+  if (!room || room.over || !room.rt) return false;
+  const seat = room.rt.indexOf(String(rt || ''));
+  if (seat === -1) return false;
+  const old = room.players[seat];
+  if (old && old !== ws && old.readyState === 1) old.close();
+  if (room.dc[seat]) { clearTimeout(room.dc[seat]); room.dc[seat] = null; }
+  room.players[seat] = ws; ws.room = room.code; ws.seat = seat; if (old && old.tour) ws.tour = old.tour;
+  if (room.tour) { const t = tours.get(room.tour.id); if (t) t.players.forEach(p => { if (p.ws === old) p.ws = ws; }); ws.tour = room.tour.id; }
+  const other = room.players[1 - seat];
+  sendWs(ws, { t: 'start', you: seat, mode: room.mode, qmode: room.qmode, st: view(room.st, seat), opp: other ? other.profile : {}, turnMs: room.turnMs,
+    room: room.code, ranked: !!room.ranked, tour: room.tour ? { id: room.tour.id } : null, rt: room.rt[seat], resumed: true });
+  sendWs(other, { t: 'oppBack' });
+  armTimer(room);
+  return true;
 }
 function inLiveTour(ws) { const t = ws.tour && tours.get(ws.tour); return !!(t && t.status === 'running' && t.players.some(p => p.ws === ws && p.alive)); }
 function unspec(ws) { const r = rooms.get(ws.spectating); if (r) r.specs.delete(ws); ws.spectating = null; }
@@ -644,6 +675,7 @@ wss.on('connection', ws => {
           break;
         }
         case 'hello': ws.profile = cleanProfile(m.profile, ws); break;
+        case 'resume': if (!ws.room && !resumeSeat(ws, m.room, m.rt)) sendWs(ws, { t: 'resumeFail' }); break;
 
         case 'queue': {
           const q = m.mode in queues ? m.mode : 'casual';
@@ -747,7 +779,7 @@ wss.on('connection', ws => {
   });
 
   ws.on('close', () => {
-    removeFromQueues(ws); leaveRoom(ws, 'left'); unspec(ws);
+    removeFromQueues(ws); if (!softLeave(ws)) leaveRoom(ws, 'left'); unspec(ws);
     if (ws.user) { const s = userSockets.get(ws.user.key); if (s) { s.delete(ws); if (!s.size) userSockets.delete(ws.user.key); } }
   });
 });

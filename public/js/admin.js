@@ -82,7 +82,7 @@ async function admUser(name) {
   if (s !== 200) return toast('❌ ' + (u.error || ''));
   const ok = p => can(p) && u.canAct, T = u.totals || {};
   const myLevel = AUTH.user.level, founder = AUTH.user.role === 'kurucu';
-  const assignable = (CONTENT.ranks || []).filter(r => r.id !== 'kurucu' && (founder || r.level < myLevel));
+  const assignable = Array.isArray(u.assignable) ? u.assignable : (CONTENT.ranks || []).filter(r => r.id !== 'kurucu' && (founder || r.level < myLevel));
   const sec = (title, body) => `<div class="admsec"><b>${title}</b>${body}</div>`;
   const row = (...x) => `<div class="row" style="margin-top:6px;flex-wrap:wrap">${x.join('')}</div>`;
   const N = esc(u.name).replace(/'/g, '');
@@ -92,7 +92,7 @@ async function admUser(name) {
   if (ok('items')) parts.push(sec('🎁 ' + t('Eşya'), row(`<select class="inp" id="ad-ic" style="width:150px" onchange="$('ad-ii').innerHTML=itemOpts(this.value)">${catOpts('boards')}</select>`, `<select class="inp" id="ad-ii" style="width:190px">${itemOpts('boards')}</select>`,
     `<button class="btn xs" onclick="admDo('item',{cat:$('ad-ic').value,id:$('ad-ii').value})">${t('Ver')}</button>`, `<button class="btn xs sec" onclick="admDo('item',{bots:true})">🤖 ${t('Tüm botları aç')}</button>`)));
   if (ok('elo')) parts.push(sec('🏅 Elo', row(`<input class="inp" id="ad-e" type="number" value="${u.elo}" style="width:120px">`, `<button class="btn xs" onclick="admDo('elo',{elo:+$('ad-e').value})">${t('Ayarla')}</button>`)));
-  if (ok('ranks') && !u.self) parts.push(sec('🎖️ ' + t('Rank'), row(`<select class="inp" id="ad-r" style="width:200px"><option value="user">${t('Oyuncu')} (${t('rank yok')})</option>${assignable.map(r => `<option value="${r.id}" ${r.id === u.role ? 'selected' : ''}>${esc(r.icon + ' ' + nm(r))} (${r.level})</option>`).join('')}</select>`, `<button class="btn xs" onclick="admDo('role',{role:$('ad-r').value})">${t('Ver')}</button>`)));
+  if (ok('ranks') && !u.self) parts.push(sec('🎖️ ' + t('Rank') + ' · ' + t('şu an') + ': ' + (rankBadge(u.rank) || t('Oyuncu')), `<div class="rankpick">${[{ id: 'user', name: 'Oyuncu', en: 'Player', icon: '🙂', color: '#c9b39a', level: 0 }, ...assignable].map(r => `<button class="rkopt ${r.id === (u.role || 'user') ? 'on' : ''}" style="--rc:${r.color}" ${r.id === (u.role || 'user') ? 'disabled' : ''} onclick="this.classList.add('busy');admDo('role',{role:'${r.id}'})">${r.icon || ''} ${esc(nm(r))}<small>${r.level ? t('Seviye') + ' ' + r.level : t('rank yok')}</small></button>`).join('')}</div>${assignable.length ? '' : `<p class="muted small">${t('Verebileceğin rank yok (sadece kendinden düşük ranklar verilebilir).')}</p>`}`));
   if (can('ranksEdit') && u.canAct) parts.push(sec('∞ ' + t('Sınırsız para (test hesabı gibi)'), row(`<button class="switch ${u.ownUnlimited ? 'on' : ''}" onclick="admDo('unlimited',{on:${!u.ownUnlimited}})"></button>`, `<span class="muted small">${t('Sadece bu oyuncuya özel. Ranka sınırsız vermek için Ranklar sekmesini kullan.')}</span>`)));
   if (ok('warn')) parts.push(sec('⚠️ ' + t('Uyarı gönder'), row(`<input class="inp" id="ad-w" maxlength="200" placeholder="${t('Uyarı mesajı')}" style="flex:1;min-width:200px">`, `<button class="btn xs" onclick="admDo('warn',{msg:$('ad-w').value})">${t('Gönder')}</button>`)
     + (u.warns.length ? `<div class="small muted" style="margin-top:6px">${u.warns.slice(-5).reverse().map(w => `• ${fmtDT(w.at)} — ${esc(w.by)}: ${esc(w.msg)}`).join('<br>')}</div>` : '')));

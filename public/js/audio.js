@@ -36,7 +36,7 @@ const Sound = (() => {
   const ok = () => init() && ctx.state !== 'closed' && (ctx.state === 'running' || ctx.resume(), true);
   const sfx = {
     // taş kuyuya düşer: tok "tık" (ahşap + taş)
-    clack() { if (!ok()) return; const t = t0(), p = 0.85 + Math.random() * 0.3;
+    clack(k) { if (!ok()) return; const t = t0(), SC = [1, 1.125, 1.26, 1.5, 1.68, 2, 2.25, 2.52, 3], p = k == null ? 0.85 + Math.random() * 0.3 : SC[k % SC.length] * (1 + Math.floor(k / SC.length) * 0.12) * 0.8;
       tone(1900 * p, { type: 'triangle', t, dec: 0.035, vol: 0.18 }); tone(620 * p, { type: 'sine', t, dec: 0.08, vol: 0.22, slide: 0.7 });
       noise({ t, dec: 0.03, vol: 0.18, freq: 4200 * p, q: 2 }); },
     // hazineye taş: derin, tok bas
@@ -58,6 +58,12 @@ const Sound = (() => {
     swap() { if (!ok()) return; const t = t0(); tone(500, { t, dec: 0.12, vol: 0.15, slide: 1.8 }); tone(900, { t: t + 0.12, dec: 0.12, vol: 0.15, slide: 0.55 }); },
     mystery() { if (!ok()) return; const t = t0(); [660, 880, 990, 1320].forEach((f, i) => tone(f, { type: 'sine', t: t + i * 0.05, dec: 0.3, vol: 0.12 })); },
     tick() { if (!ok()) return; tone(1500, { type: 'square', dec: 0.02, vol: 0.05, filter: 3000 }); },
+    boom() { if (!ok()) return; const t = t0(); tone(70, { t, a: 0.005, dec: 0.9, vol: 0.7, slide: 0.45 }); tone(140, { type: 'triangle', t, dec: 0.25, vol: 0.25, slide: 0.5 }); noise({ t, dec: 0.4, vol: 0.25, type: 'lowpass', freq: 400 }); },
+    crash() { if (!ok()) return; const t = t0(); noise({ t, dec: 0.9, vol: 0.5, type: 'bandpass', freq: 1200, q: 0.4 }); noise({ t: t + 0.05, dec: 0.6, vol: 0.35, type: 'highpass', freq: 3000 });
+      tone(90, { t, dec: 0.6, vol: 0.5, slide: 0.4 }); for (let i = 0; i < 10; i++) tone(500 + Math.random() * 1800, { type: 'triangle', t: t + 0.1 + Math.random() * 0.6, dec: 0.05, vol: 0.08 }); },
+    riser(n = 2) { if (!ok()) return; const t = t0(), f = 300 + n * 90; tone(f, { type: 'sawtooth', t, a: 0.02, dec: 0.45, vol: 0.06, slide: 2.2, filter: 2500 }); [0, 0.08, 0.16].forEach((d, i) => tone(f * (1.5 + i * 0.5), { type: 'triangle', t: t + 0.3 + d, dec: 0.25, vol: 0.12 })); },
+    cheer() { if (!ok()) return; const t = t0(); for (let i = 0; i < 4; i++) noise({ t: t + i * 0.18, dec: 0.7, vol: 0.07, type: 'bandpass', freq: 900 + i * 400, q: 0.6 }); },
+    vote() { if (!ok()) return; tone(1320, { type: 'sine', dec: 0.06, vol: 0.06 }); },
     pop() { if (!ok()) return; tone(600, { type: 'sine', dec: 0.08, vol: 0.15, slide: 1.6 }); }
   };
 

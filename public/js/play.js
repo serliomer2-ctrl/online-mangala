@@ -14,6 +14,7 @@ function gBase() {
   return { oppName: G.opp.name, hands: [S.eq.hand, G.opp.hand || 'klasik'] };
 }
 function setupGameUI() {
+  const fxl = document.querySelector('#scr-game .fxlayer'); if (fxl) fxl.innerHTML = '';
   const o = G.kind === 'spectate' ? G.players[1] : G.opp, me = G.kind === 'spectate' ? G.players[0] : null;
   const line = (p, lbl) => `${esc(p.name)} ${p.rank ? rankBadge(p.rank) : ''} <span class="muted" style="font-weight:600;font-size:12px">${lbl || ''}</span>${p.title ? `<div class="ttl">${esc(titleTxt(p.title))}</div>` : ''}`;
   $('g-av1').innerHTML = avatarHTML(o.avatar, o.frame, 42);
@@ -32,6 +33,7 @@ function renderActions() {
   const a = $('g-actions');
   if (G.kind === 'puzzle') a.innerHTML = `<button class="btn sec sm" onclick="startPuzzle(G.puzzle.idx)">🔄 ${t('Sıfırla')}</button><button class="btn sec sm" onclick="puzzleHint()">💡 ${t('İpucu')}</button><button class="btn sec sm" onclick="showRulesModal()">📜</button><button class="btn red sm" onclick="G=null;go('puzzles')">✖ ${t('Çık')}</button>`;
   else if (G.kind === 'spectate') a.innerHTML = `<button class="btn sec sm" onclick="showRulesModal()">📜 ${t('Kurallar')}</button><button class="btn red sm" onclick="stopSpectate()">👁️ ${t('İzlemeyi Bırak')}</button>`;
+  else if (G.kind === 'chat') a.innerHTML = `<span class="muted small">🧪 ${t('Test oyu')}:</span>${[1, 2, 3, 4, 5, 6].map(n => `<button class="btn sec xs" onclick="Chat.testVote(${n})">!kuyu ${n}</button>`).join('')}<button class="btn sec sm" onclick="showRulesModal()">📜</button><button class="btn red sm" onclick="resign()">🏳️ ${t('Pes Et')}</button><div id="chatfeed" class="chatfeed"></div>`;
   else a.innerHTML = `<button class="btn sec sm" onclick="togglePanel('e')">😀 ${t('Emoji')}</button><button class="btn sec sm" onclick="togglePanel('m')">💬 ${t('Mesaj')}</button><button class="btn sec sm" onclick="showRulesModal()">📜</button><button class="btn red sm" onclick="resign()">🏳️ ${t('Pes Et')}</button>`;
 }
 function setStatus(m, c = '') { const s = $('gstatus'); s.innerHTML = m; s.className = c; }
@@ -94,7 +96,8 @@ async function playAct(p, act, stNext) {
     if (!res) { if (stNext) { G.st = stNext; gRender(); } return null; }
     r = res.r; st1 = stNext || res.st;
     const oppBefore = Engine.sideSum(st0.b, 1 - p);
-    await animate($('gboard'), st0, p, act.pit, r, st1, gBase());
+    await animate($('gboard'), st0, p, act.pit, r, st1, { ...gBase(), ko: !!st1.over && G.kind !== 'puzzle' });
+    comboFx(p, r);
     if (p === 0 && G.kind !== 'spectate') afterMyMove(st0, st1, r, oppBefore);
   } else {
     st1 = stNext || Engine.useCard(st0, p, act.card, act.arg);
@@ -104,6 +107,12 @@ async function playAct(p, act, stNext) {
   if (G.acts) G.acts.push({ by: p, ...act });
   G.st = st1;
   return { r, st1, act };
+}
+function comboFx(p, r) {
+  if (!G || !r) return; const el = document.querySelector(`#gboard [data-i="${STORE[p]}"]`);
+  if (r.extra) { G.combo = (G.combo || 0) + 1; if (G.combo >= 2) { FX.combo(G.combo, el); if (p === 0 && G.combo >= 3 && G.kind !== 'spectate' && G.kind !== 'puzzle') unlockAch('kombo3'); } }
+  else G.combo = 0;
+  if (r.cap && r.cap.amount >= 6) FX.megaCapture(r.cap.amount, el);
 }
 function afterMyMove(st0, st1, r, oppBefore) {
   if (G.kind === 'puzzle') return;
@@ -139,6 +148,7 @@ async function doAct(p, act) {
   if (G.st.turn === 0 && p === 1) G.turnGain = 0;
   setStatus(msg || (G.st.turn === 0 ? t('Senin sıran. Bir kuyu seç.') : `${esc(G.opp.name)} ${t('düşünüyor...')}`), cls);
   G.busy = false; gRender();
+  if (G.kind === 'chat') { if (G.st.turn === 1) setTimeout(() => G && G.kind === 'chat' && !G.over && Chat.startVote(), 700); else Chat.drawVotes(); }
   if (G.kind === 'bot' || G.kind === 'btour') {
     botReact(p, out);
     if (G.st.turn === 1) setTimeout(botTurn, out.r && (out.r.cap || out.r.extra) ? 800 : act.type === 'card' ? 500 : 380);
@@ -216,7 +226,8 @@ async function endGame(r, opt = {}) {
   else { const w = Engine.winnerOf(G.st); outcome = w === -1 ? 'draw' : w === 0 ? 'win' : 'loss'; }
   const title = { win: t('KAZANDIN!'), loss: t('Kaybettin'), draw: t('Berabere!') }[outcome], big = { win: '🏆', loss: '😔', draw: '🤝' }[outcome];
   // ödüller
-  let coins = online ? ONLINE_REWARD[outcome] : outcome === 'win' ? bot.reward : outcome === 'draw' ? Math.round(bot.reward / 2) : 10;
+  const baseR = bot ? bot.reward : 150;
+  let coins = online ? ONLINE_REWARD[outcome] : outcome === 'win' ? baseR : outcome === 'draw' ? Math.round(baseR / 2) : 10;
   if (G.kind === 'btour') coins = 0;
   if (opt.resignedMe) coins = 0;
   coins *= coinMult();
@@ -233,6 +244,7 @@ async function endGame(r, opt = {}) {
     S.streak++; unlockAch('ilk_zafer'); if (S.streak >= 5) unlockAch('seri5');
     if (bot) { if (bot.id === 'efsane') unlockAch('efsane_avcisi'); if (!S.botsBeaten.includes(bot.id)) S.botsBeaten.push(bot.id); if (S.botsBeaten.length >= BOTS.length) unlockAch('tum_botlar'); }
     if (mode === 'blitz') unlockAch('yildirim'); if (PARTY.includes(mode)) unlockAch('kaos'); if (mode === 'reverse') unlockAch('ters_dahi');
+    if (G.kind === 'chat') unlockAch('chat_yendi'); if (Cam.on) unlockAch('kamera_zafer');
     if (online) unlockAch('online_zafer'); if (me >= 36 && mode !== 'reverse') unlockAch('ezici');
     if (!opt.reason && G.scoreHist.slice(-3).some(d => mode === 'reverse' ? d > 0 : d < 0)) unlockAch('clutch');
   } else if (outcome === 'loss') S.streak = 0;
@@ -242,7 +254,9 @@ async function endGame(r, opt = {}) {
   saveReplay(outcome, me, op);
   persist();
   const xr = addXP(xp);
-  if (outcome === 'win') { Sound.sfx.win(); confetti(); vib([40, 60, 40, 60, 80]); } else if (outcome === 'loss') Sound.sfx.defeat();
+  if (outcome === 'win') { Sound.sfx.win(); Sound.sfx.cheer(); confetti(); vib([40, 60, 40, 60, 80]); } else if (outcome === 'loss') Sound.sfx.defeat();
+  if (!opt.reason || opt.reason === 'timeout') FX.bigText(outcome === 'win' ? t('ZAFER!') : outcome === 'loss' ? t('K.O.') : t('BERABERE!'), 'ko-' + outcome, 1700);
+  if (online) lsDel('mangala_resume');
   let endTxt = '';
   if (r && r.end) endTxt = `<p class="muted small">${r.end.collector === 0 ? t('Taşlarını ilk sen bitirdin') : t('{0} taşlarını ilk bitirdi', esc(G.opp.name))} · +${r.end.amount}</p>`;
   if (opt.reason === 'left') endTxt = `<p class="muted">${t('Rakibin oyundan ayrıldı.')}</p>`;
@@ -255,6 +269,9 @@ async function endGame(r, opt = {}) {
   const html = `<div class="big">${big}</div><h3>${title}</h3>${mode === 'reverse' ? `<p class="small" style="color:#d9c6ff">🔄 ${t('Ters modda az taş kazanır')}</p>` : ''}<p style="font-size:21px;font-weight:900">${esc(myName())} ${me} — ${op} ${esc(G.opp.name)}</p>${endTxt}<div class="rewards">${rw.map(x => `<span>${x}</span>`).join('')}</div>`;
   if (!online && Math.random() < .6) setTimeout(() => G && showEmote(1, 'm', outcome === 'win' ? 'temel:2' : 'temel:1'), 400);
   const hasReplay = G.acts && G.acts.length > 0;
+  await wait(opt.reason ? 300 : 1200);
+  const rageBtn = outcome === 'loss' ? [{ label: '🤬 ' + t('Masayı Devir'), cls: 'red', value: 'rage' }] : [];
+  const ask = async (h, btns) => { let v; while ((v = await modal(h, btns)) === 'rage') await rageQuit(); return v; };
   if (G.kind === 'btour') { btourAfterMatch(outcome); return; }
   if (online) {
     if (G.tour) {
@@ -262,7 +279,7 @@ async function endGame(r, opt = {}) {
       if (v === 'rep') { G = null; viewReplay(0, 'tour'); } else { G = null; tourView = 'online'; go('tour'); }
       return;
     }
-    const v = await modal(html + `<p class="muted small" id="remtxt"></p>`, [{ label: t('Menü'), cls: 'sec', value: 'menu' }, ...(hasReplay ? [{ label: '🎬', cls: 'sec', value: 'rep' }] : []), ...(G.oppLeft ? [] : [{ label: '🔁 ' + t('Rövanş'), value: 'rematch' }])]);
+    const v = await ask(html + `<p class="muted small" id="remtxt"></p>`, [...rageBtn, { label: t('Menü'), cls: 'sec', value: 'menu' }, ...(hasReplay ? [{ label: '🎬', cls: 'sec', value: 'rep' }] : []), ...(G.oppLeft ? [] : [{ label: '🔁 ' + t('Rövanş'), value: 'rematch' }])]);
     if (v === 'rematch' && G && !G.oppLeft) {
       netSend({ t: 'rematch' }); G.waitingRematch = true; setStatus('🔁 ' + t('Rövanş isteği gönderildi, rakip bekleniyor...'), 'info');
       const v2 = await modal(`<div class="spinner"></div><h3>${t('Rakip bekleniyor')}</h3>`, [{ label: t('Vazgeç'), cls: 'sec', value: 'menu' }]);
@@ -270,9 +287,15 @@ async function endGame(r, opt = {}) {
     } else { netSend({ t: 'leave' }); G = null; if (v === 'rep') viewReplay(0); else go('menu'); }
     return;
   }
-  const v = await modal(html, [{ label: t('Menü'), cls: 'sec', value: 'menu' }, ...(hasReplay ? [{ label: '🎬 ' + t('Tekrar İzle'), cls: 'sec', value: 'rep' }] : []), { label: t('Tekrar Oyna'), value: 'again' }]);
-  const bid = bot.id; G = null;
-  if (v === 'again') startBot(bid, { mode }); else if (v === 'rep') viewReplay(0); else go(v);
+  const v = await ask(html, [...rageBtn, { label: t('Menü'), cls: 'sec', value: 'menu' }, ...(hasReplay ? [{ label: '🎬 ' + t('Tekrar İzle'), cls: 'sec', value: 'rep' }] : []), { label: t('Tekrar Oyna'), value: 'again' }]);
+  const kind = G.kind, bid = bot && bot.id; G = null;
+  if (v === 'again') { if (kind === 'chat') Chat.start(); else startBot(bid, { mode }); } else if (v === 'rep') viewReplay(0); else go(v);
+}
+async function rageQuit() {
+  if (G && G.kind === 'online') netSend({ t: 'emote', kind: 'e', id: 'temel:4' });
+  await FX.rageQuit($('gboard'));
+  S.rages = (S.rages || 0) + 1; unlockAch('masa_devir'); persist();
+  FX.bigText(t('MASA DEVRİLDİ!'), 'mega', 1300);
 }
 function saveReplay(res, me, op) {
   if (!G.acts || !G.acts.length || !G.init) return;
@@ -303,6 +326,7 @@ function showEmote(p, kind, id) {
   const b = $('bub' + p); if (!b) return;
   b.className = 'bubble ' + (kind === 'e' ? 'emo a-' + it.anim : ''); b.innerHTML = kind === 'e' ? `<span class="em">${v}</span>` : esc(v);
   void b.offsetWidth; b.classList.add('on'); Sound.sfx.pop();
+  if (kind === 'e') { const [x, y] = FX.at(b); FX.burst(x, y, v, 9, 0.7); }
   clearTimeout(b._t); b._t = setTimeout(() => b.classList.remove('on'), 2600);
 }
 function showRulesModal() { modal(`<div class="panel" style="text-align:left;max-height:60vh;overflow:auto;padding:4px 6px;background:none;border:0">${RULES[LANG === 'en' ? 'en' : 'tr']}</div>`, [{ label: t('Tamam'), value: 1 }]); }
@@ -315,6 +339,8 @@ RENDER.mode = () => {
     <div class="modes">
       <button class="card mcard mode" onclick="go('bots')"><div class="ic">🤖</div><h3>${t('Botlara Karşı')}</h3><p>${t('5 seviye + Yıldırım ve Parti modları')}</p></button>
       <button class="card mcard mode" onclick="onlineTab='play';go('online')"><div class="ic">🌍</div><h3>${t('Çevrimiçi')}</h3><p>${t('Hızlı, dereceli, yıldırım, parti, özel oda')}</p><p style="margin-top:6px"><span class="badge">+%50 XP</span></p></button>
+      <button class="card mcard mode invitecard" onclick="inviteFriend()"><div class="ic">🔗</div><h3>${t('Arkadaşla Oyna')}</h3><p>${t('Linki kopyala, WhatsApp\'tan gönder; arkadaşın tek tıkla maça girsin')}</p></button>
+      ${S.chatMode ? `<button class="card mcard mode" onclick="Chat.start()"><div class="ic">📺</div><h3>${t('Chat\'e Karşı')}</h3><p>${t('Yayın sohbeti !kuyu 1-6 ile oy verip sana karşı oynar')}</p></button>` : ''}
       <button class="card mcard mode" onclick="go('puzzles')"><div class="ic">🧩</div><h3>${t('Bulmacalar')}</h3><p>${t('{0} taktik görev', PUZZLES.length)}</p></button>
       <button class="card mcard mode" onclick="tourView='bot';go('tour')"><div class="ic">🏆</div><h3>${t('Bot Turnuvası')}</h3><p>${t('4 veya 8 kişilik eleme, ücretsiz katılım')}</p></button>
       <button class="card mcard mode" onclick="onlineTab='tour';go('online')"><div class="ic">🌐🏆</div><h3>${t('Çevrimiçi Turnuva')}</h3><p>${t('Gerçek oyuncularla braket turnuvası')}</p></button>
@@ -600,7 +626,8 @@ function netConnect() {
   ws.onopen = () => { clearTimeout(slow); NET.state = 'ok'; NET.retry = 0; ws.send(JSON.stringify({ t: 'auth', token: AUTH.token || '', profile: myProfile() })); if (curScreen === 'online') RENDER.online(); };
   ws.onclose = () => { clearTimeout(slow);
     const wasOk = NET.state === 'ok'; NET.ws = null; NET.state = wasOk ? 'lost' : 'error'; NET.lobby = 'idle';
-    if (G && (G.kind === 'online' || G.kind === 'spectate') && !G.over) { G.over = true; setTimer(0, null); closeModal();
+    if (G && G.kind === 'online' && !G.over) { G.dc = true; setTimer(null, null); setStatus('📡 ' + t('Bağlantı koptu, maça geri bağlanılıyor...'), 'bad'); toast('📡 ' + t('Bağlantı koptu, maça geri bağlanılıyor...'), 4000); NET.retry = 0; }
+    else if (G && G.kind === 'spectate' && !G.over) { G.over = true; setTimer(0, null); closeModal();
       modal(`<div class="big">📡</div><h3>${t('Bağlantı koptu')}</h3><p class="muted">${t('Sunucu ile bağlantı kesildi. Bu oyun sayılmadı.')}</p>`, [{ label: t('Menü'), value: 1 }]).then(() => { G = null; go('menu'); }); }
     if (curScreen === 'online') RENDER.online();
     if (!NET.manual && (AUTH.token || AUTH.guest)) { NET.retry = Math.min(NET.retry + 1, 6); setTimeout(() => { if (!NET.ws && !NET.manual) netConnect(); }, 2000 * NET.retry); } };
@@ -609,10 +636,17 @@ function netConnect() {
 async function netHandle(m) {
   switch (m.t) {
     case 'welcome': case 'count': NET.online = m.n; { const e = $('oncount'); if (e) e.textContent = m.n; } break;
-    case 'authed': NET.authed = m.user; if (m.user && AUTH.user && m.elo) AUTH.user.elo = m.elo; break;
+    case 'authed': { NET.authed = m.user; if (m.user && AUTH.user && m.elo) AUTH.user.elo = m.elo;
+      const rs = lsGet('mangala_resume');
+      if (rs && Date.now() - rs.at < 45000) netSend({ t: 'resume', room: rs.room, rt: rs.rt }); else lsDel('mangala_resume');
+      if (PENDING_ROOM) { const c = PENDING_ROOM; PENDING_ROOM = null; toast('🎮 ' + t('Arkadaşının odasına katılıyorsun: {0}', c)); netSend({ t: 'join', code: c }); }
+      break; }
     case 'queued': NET.lobby = 'queue'; NET.qmode = m.mode; RENDER.online(); break;
     case 'cancelled': NET.lobby = 'idle'; if (curScreen === 'online') RENDER.online(); break;
-    case 'room': NET.lobby = 'room'; NET.code = m.code; RENDER.online(); break;
+    case 'room': NET.lobby = 'room'; NET.code = m.code; privMode = m.mode || privMode; if (NET.invite) { NET.invite = false; copyLink(); } RENDER.online(); break;
+    case 'oppDc': toast('📡 ' + t('Rakibin bağlantısı koptu, {0} sn bekleniyor...', m.secs), 4000); setStatus('📡 ' + t('Rakibin bağlantısı koptu, {0} sn bekleniyor...', m.secs), 'info'); break;
+    case 'oppBack': toast('✅ ' + t('Rakibin maça geri döndü!')); setStatus(G && G.st.turn === 0 ? t('Senin sıran. Bir kuyu seç.') : '', 'good'); break;
+    case 'resumeFail': lsDel('mangala_resume'); if (G && G.kind === 'online' && G.dc) { G.over = true; setTimer(null, null); modal(`<div class="big">📡</div><h3>${t('Maça geri dönülemedi')}</h3><p class="muted">${t('Bağlantı çok uzun süre koptu.')}</p>`, [{ label: t('Menü'), value: 1 }]).then(() => { G = null; go('menu'); }); } break;
     case 'err': toast('❌ ' + esc(t(m.msg)), 3500); Sound.sfx.error();
       if (m.full) { const ok = await modal(`<div class="big">👁️</div><p>${t('Oda dolu. İzleyici olarak girmek ister misin?')}</p>`, [{ label: t('Hayır'), cls: 'sec', value: 0 }, { label: t('İzle'), value: 1 }]); if (ok) spectate(m.full); }
       if (NET.lobby === 'tourq') { NET.lobby = 'idle'; if (curScreen === 'online') RENDER.online(); } break;
@@ -620,7 +654,7 @@ async function netHandle(m) {
     case 'act': await netAct(m); break;
     case 'sync': if (G && G.kind === 'online') { G.st = m.st; G.busy = false; gRender(); } break;
     case 'emote': if (G && G.kind === 'online') showEmote(1, m.kind, m.id); else if (G && G.kind === 'spectate') showEmote(m.seat === 0 ? 0 : 1, m.kind, m.id); break;
-    case 'over': await netOver(m); break;
+    case 'over': lsDel('mangala_resume'); await netOver(m); break;
     case 'oppRematch': { const tt = $('remtxt'); if (tt) tt.innerHTML = '🔁 <b>' + t('Rakibin rövanş istiyor!') + '</b>'; toast('🔁 ' + t('Rakibin rövanş istiyor!')); break; }
     case 'oppLeft': if (G && G.kind === 'online') { G.oppLeft = true;
         if (G.waitingRematch) { closeModal(); modal(`<div class="big">👋</div><h3>${t('Rakibin ayrıldı')}</h3>`, [{ label: t('Menü'), value: 1 }]).then(() => { netSend({ t: 'leave' }); G = null; go('menu'); }); }
@@ -650,6 +684,8 @@ async function netHandle(m) {
 }
 function netStart(m) {
   closeModal(); NET.you = m.you; NET.lobby = 'game';
+  if (m.rt) lsSet('mangala_resume', { room: m.room, rt: m.rt, at: Date.now() });
+  if (m.resumed) setTimeout(() => toast('🔄 ' + t('Maça geri döndün!')), 300);
   const o = m.opp || {};
   G = { kind: 'online', mode: m.mode, qmode: m.qmode, ranked: m.ranked, tour: m.tour, st: m.st, init: Engine.clone(m.st), acts: [], scoreHist: [], over: false, busy: false, turnMs: m.turnMs, turnGain: 0,
     opp: { name: o.name || t('Rakip'), avatar: CAT.avatars[o.avatar] ? o.avatar : 'gulen', frame: CAT.frames[o.frame] ? o.frame : 'yok', hand: CAT.hands[o.hand] ? o.hand : 'klasik', title: o.title, elo: m.ranked ? o.elo : null, level: o.level, rank: o.rank || null, guest: o.guest } };
@@ -666,6 +702,7 @@ async function netAct(m) {
   if (m.by === 0 && m.act.type === 'move') G.scoreHist.push(Engine.score(G.st, 0) - Engine.score(G.st, 1));
   const out = await playAct(m.by, m.act, m.st);
   if (!G || G.kind !== 'online') return;
+  const rs = lsGet('mangala_resume'); if (rs) { rs.at = Date.now(); lsSet('mangala_resume', rs); }
   G.st = m.st; G.busy = false;
   if (G.st.turn === 0 && m.by === 1) G.turnGain = 0;
   G.lastR = out && out.r;
@@ -711,7 +748,7 @@ RENDER.online = () => {
       <div class="row center"><button class="btn" onclick="netConnect()">🔄 ${t('Tekrar Dene')}</button><button class="btn sec" onclick="go('settings')">⚙️ ${t('Ayarlar')}</button><button class="btn sec" onclick="go('bots')">🤖 ${t('Botlarla Oyna')}</button></div></div>`;
   } else if (NET.state !== 'ok') h += `<div class="spinner"></div>`;
   else if (NET.lobby === 'queue') h += `<div class="card" style="text-align:center"><div class="spinner"></div><h3>${t('Rakip aranıyor...')}</h3><p class="muted">${{ casual: t('Hızlı Eşleşme'), ranked: t('Dereceli'), blitz: t('Yıldırım'), party: t('Parti Modu') }[NET.qmode] || ''}</p><button class="btn sec" onclick="netSend({t:'cancel'})">${t('İptal')}</button></div>`;
-  else if (NET.lobby === 'room') h += `<div class="card" style="text-align:center"><p>${t('Bu kodu arkadaşına gönder; o da "Odaya Katıl"a yazsın:')}</p><div class="code">${esc(NET.code)}</div><p class="muted">${MODES[privMode].icon} ${nm(MODES[privMode])}</p><div class="spinner"></div><button class="btn sec" onclick="netSend({t:'cancel'})">${t('Odayı Kapat')}</button></div>`;
+  else if (NET.lobby === 'room') h += `<div class="card" style="text-align:center"><p>${t('Bu linki arkadaşına gönder, tek tıkla maça girsin:')}</p><div class="linkbox"><input class="inp" readonly value="${esc(roomLink())}" onclick="this.select()"></div><div class="row center" style="margin:10px 0"><button class="btn sm" onclick="copyLink()">📋 ${t('Kopyala')}</button><a class="btn sm green" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(t('Mangala oynayalım mı? 🪨 Tıkla ve maça gir:') + ' ' + roomLink())}">💬 WhatsApp</a>${navigator.share ? `<button class="btn sm sec" onclick="shareLink()">📤 ${t('Paylaş')}</button>` : ''}</div><p class="muted small">${t('veya kodu yazsın')}:</p><div class="code">${esc(NET.code)}</div><p class="muted">${MODES[privMode].icon} ${nm(MODES[privMode])}</p><div class="spinner"></div><button class="btn sec" onclick="netSend({t:'cancel'})">${t('Odayı Kapat')}</button></div>`;
   else if (NET.lobby === 'tourq') h += `<div class="card" style="text-align:center"><div class="spinner"></div><h3>${t('Turnuva oyuncuları bekleniyor')}: ${NET.tourQ ? NET.tourQ.n + '/' + NET.tourQ.size : ''}</h3><p class="muted">${t('Dolunca turnuva otomatik başlar.')}</p><button class="btn sec" onclick="netSend({t:'tourLeave'})">${t('Sıradan Ayrıl')}</button></div>`;
   else if (onlineTab === 'play') {
     const q = (mode, ic, name, desc, need) => `<div class="card mode"><div class="ic">${ic}</div><h3>${name}</h3><p class="muted small">${desc}</p><button class="btn ${need && !AUTH.user ? 'sec' : ''}" ${need && !AUTH.user ? 'disabled' : ''} onclick="netSend({t:'queue',mode:'${mode}'})">${need && !AUTH.user ? '🔒 ' + t('Giriş gerekli') : t('Rakip Bul')}</button></div>`;
@@ -736,6 +773,21 @@ RENDER.online = () => {
   el.innerHTML = h;
 };
 function setPrivMode(k) { privMode = k; RENDER.online(); }
+let PENDING_ROOM = (() => { try { const c = new URLSearchParams(location.search).get('room'); if (c && /^[A-Za-z0-9]{4}$/.test(c)) { history.replaceState(null, '', location.pathname); return c.toUpperCase(); } } catch { } return null; })();
+const roomLink = () => `${location.origin}${location.pathname}?room=${NET.code}`;
+async function copyLink() {
+  const l = roomLink();
+  try { await navigator.clipboard.writeText(l); toast('📋 ' + t('Link kopyalandı! WhatsApp\'a yapıştır ve gönder.'), 3500); Sound.sfx.coin(); }
+  catch { await promptModal(`<h3>🔗 ${t('Davet linki')}</h3>`, [{ id: 'lnk', val: l }], t('Tamam')); }
+}
+function shareLink() { navigator.share({ title: 'Dijital Mangala', text: t('Mangala oynayalım mı? 🪨 Tıkla ve maça gir:'), url: roomLink() }).catch(() => { }); }
+function inviteFriend() {
+  onlineTab = 'play'; NET.invite = true;
+  const send = () => netSend({ t: 'create', mode: privMode });
+  if (NET.ws && NET.ws.readyState === 1) { if (NET.lobby === 'room') { NET.invite = false; copyLink(); } else send(); }
+  else { netConnect(); const iv = setInterval(() => { if (NET.ws && NET.ws.readyState === 1) { clearInterval(iv); setTimeout(send, 300); } }, 300); setTimeout(() => clearInterval(iv), 70000); }
+  go('online');
+}
 function netJoin() { const c = ($('codein').value || '').trim().toUpperCase(); if (c.length !== 4) return toast(t('Kod 4 karakter olmalı')); netSend({ t: 'join', code: c }); }
 function spectateCode() { const c = ($('codein').value || '').trim().toUpperCase(); if (c.length !== 4) return toast(t('Kod 4 karakter olmalı')); spectate(c); }
 function netLeaveLobby() { if (NET.lobby === 'queue' || NET.lobby === 'room') netSend({ t: 'cancel' }); if (NET.lobby !== 'tourq') NET.lobby = 'idle'; go('mode'); }

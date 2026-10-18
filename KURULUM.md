@@ -231,3 +231,18 @@ Profil → Hesap → **Değiştir**. Hesapta **doğrulanmış e-posta** olmalı;
 | "Sunucuya ulaşılamadı" | Sunucu uyuyor olabilir. 1 dk bekle, **Tekrar dene**. |
 | E-posta gelmiyor | Spam klasörü · Brevo'da gönderici doğrulandı mı? · `MAIL_FROM` aynı adres mi? |
 | Admin şifresini unuttum | Atlas'ta `users` koleksiyonundan `admin` kaydını sil ve Render'da sunucuyu yeniden başlat. `ADMIN_PASSWORD` ile yeniden oluşur. |
+
+---
+
+## 🎉 Eğlence özellikleri (v3.2)
+
+| Özellik | Nasıl çalışır |
+|---|---|
+| 🔗 **Arkadaşla Oyna (link)** | Oyna → **Arkadaşla Oyna**. Oda kurulur ve `https://...onrender.com/?room=ABCD` linki panoya kopyalanır. WhatsApp butonu da var. Arkadaşın linke tıklayınca giriş yapıp (veya misafir olarak) doğrudan maça girer. |
+| 🔄 **Yeniden bağlanma** | Maç sırasında bağlantı koparsa ya da sayfa yenilenirse **30 saniye** içinde aynı maça otomatik dönülür. Rakip "bağlantı koptu, bekleniyor" mesajı görür. 30 sn geçerse kopan oyuncu kaybetmiş sayılır. |
+| 🎬 **Slow-motion K.O.** | Maçı bitiren son taş yavaşlar, kamera o kuyuya yaklaşır, bas vuruşuyla ekran bembeyaz parlar; ardından ZAFER / K.O. yazısı ve konfeti gelir. |
+| 🤬 **Masayı Devir** | Kaybedince sonuç penceresinde çıkar: tahta havaya kalkar, taşlar ekrana saçılır. Çevrimiçide rakibe 😡 gider. |
+| 🔥 **Kombo & Mega** | Art arda ekstra turlarda "KOMBO x2, x3..." yazısı ve sesi çıkar. 6+ taş alınca ekran sarsılır. Taşlar düşerken her taş bir üst notayı çalar. |
+| 📷 **Kamera ile el kontrolü** | Ayarlar → aç. Yumruk yap = kuyudaki taşları al, elini aç = bırak (hamle). Menülerde de aynı hareketle tıklanır. **HTTPS** gerekir (Render adresi HTTPS'tir) ve kamera izni istenir. Görüntü cihazdan çıkmaz; el modeli Google'ın MediaPipe kütüphanesidir. |
+| 📺 **Twitch Chat Plays** | Ayarlar → Yayın Modu → kanal adını yaz → Bağlan. Oyna → **Chat'e Karşı**. Sohbet `!kuyu 1`…`!kuyu 6` yazarak oy verir; en çok oy alan kuyu oynanır, kimse oy vermezse yapay zekâ oynar. Twitch'e anonim, salt okunur bağlanılır (şifre gerekmez). Test için ekranda "Test oyu" butonları var. |
+| 📱 **Mobil** | Ekran yüksekliği `100dvh` ile kilitli. Kuyuların dokunma alanı genişletildi. Arka plan ve konfeti, ekranın piksel yoğunluğuna göre keskin çiziliyor. |

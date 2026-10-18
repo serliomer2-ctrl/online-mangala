@@ -21,7 +21,7 @@ const lsDel = k => { try { localStorage.removeItem(k); } catch { } };
 const DEF = { coins: 0, tutorialDone: false, tutStep: 0,
   own: { boards: ['klasik'], stones: ['renkli'], hands: ['klasik'], avatars: ['gulen'], frames: ['yok'], emojis: ['temel'], msgs: ['temel'] },
   eq: { board: 'klasik', stone: 'renkli', hand: 'klasik', avatar: 'gulen', frame: 'yok' },
-  bots: ['kolay'], speed: 'normal', handAnim: true, music: true, musicVol: 0.4, sfxVol: 0.8, haptics: true, layout: 'auto',
+  bots: ['kolay'], camera: false, chatMode: false, chatChannel: '', chatVoteSec: 15, rages: 0, speed: 'normal', handAnim: true, music: true, musicVol: 0.4, sfxVol: 0.8, haptics: true, layout: 'auto',
   name: '', xp: 0, stats: {}, totals: { games: 0, wins: 0, draws: 0, online: 0, onlineWins: 0, even: 0, empty: 0, extra: 0, best: 0, tourWins: 0 },
   pass: { season: '', xp: 0, premium: false, free: [], prem: [] }, daily: { day: '', prog: {}, claimed: [] }, login: { last: '', streak: 0 },
   event: { key: '', prog: 0, claimed: false }, achs: {}, title: 'caylak', puzzles: {}, replays: [], streak: 0, botsBeaten: [], btour: null, botMode: 'classic', tourWins: 0 };
@@ -131,7 +131,7 @@ function renderAuth() {
        <label class="fl">${t('E-posta')} <span class="muted">(${t('isteğe bağlı — şifreni unutursan kod gönderilir')})</span></label><input class="inp" id="au-mail" type="email" autocomplete="email" maxlength="120">
        <div class="err" id="au-err"></div><button class="btn wide" id="au-go" onclick="doRegister()">${t('Hesap Oluştur')}</button>
        ${lsGet('mangala_guest_v3') ? `<p class="muted small" style="text-align:center">${t('Misafir ilerlemen yeni hesabına aktarılacak.')}</p>` : ''}`;
-  $('scr-auth').innerHTML = `<div class="auth">
+  $('scr-auth').innerHTML = `<div class="auth">${typeof PENDING_ROOM !== 'undefined' && PENDING_ROOM ? `<div class="card invite">🎮 <b>${t('Arkadaşın seni maça çağırıyor!')}</b><br><span class="muted small">${t('Oda')}: <b>${esc(PENDING_ROOM)}</b> · ${t('Giriş yap ya da misafir olarak oyna; maça otomatik katılırsın.')}</span></div>` : ''}
     <div class="logo-big"><div style="font-size:54px">🪨</div><h1>MANGALA</h1><p class="muted" style="margin:4px 0 0">${t('Binlerce yıllık Türk zekâ ve strateji oyunu')}</p></div>
     <div class="card">
       <div class="tabs2"><button class="${authTab === 'login' ? 'on' : ''}" onclick="authTab='login';renderAuth()">${t('Giriş')}</button><button class="${authTab === 'reg' ? 'on' : ''}" onclick="authTab='reg';renderAuth()">${t('Kayıt Ol')}</button></div>
@@ -194,6 +194,8 @@ function playGuest() {
 function enterGame() {
   document.body.classList.remove('authscr');
   fixCoins(); applySettings(); ensurePeriods(); persist(); updTop(); loadContent();
+  if (S.camera) Cam.start();
+  if (S.chatMode && S.chatChannel) Chat.connect(S.chatChannel);
   go(S.tutorialDone ? 'menu' : 'tutorial');
   netConnect();
 }
@@ -449,10 +451,10 @@ function renderBoard(el, b, o = {}) {
     if (i === 13) return 'grid-row:1;grid-column:1/3'; if (i === 6) return 'grid-row:8;grid-column:1/3';
     return i < 6 ? `grid-column:1;grid-row:${i + 2}` : `grid-column:2;grid-row:${12 - i + 2}`;
   };
-  const store = (i, lbl, p) => `<div class="store ${cls(i)}" data-i="${i}" style="${pos(i)}">${stonesHTML(i, b[i], true, pal, o.dropAt === i)}<span class="cnt">${b[i]}</span>${bonus(p)}${o.labels !== false ? `<span class="slbl">${lbl}</span>` : ''}${extras(i)}</div>`;
+  const store = (i, lbl, p) => `<div class="store ${cls(i)}" data-i="${i}" style="${pos(i)}">${stonesHTML(i, b[i], true, pal, o.dropAt === i)}<span class="hit"></span><span class="cnt">${b[i]}</span>${bonus(p)}${o.labels !== false ? `<span class="slbl">${lbl}</span>` : ''}${extras(i)}</div>`;
   let h = store(13, o.oppName ? esc(o.oppName) : t('Rakip hazinesi'), 1);
-  for (let i = 12; i >= 7; i--) h += `<div class="pit popp ${cls(i)}" data-i="${i}" style="${pos(i)}">${stonesHTML(i, b[i], false, pal, o.dropAt === i)}<span class="cnt">${b[i]}</span>${extras(i)}</div>`;
-  for (let i = 0; i < 6; i++) h += `<div class="pit pme ${cls(i)}" data-i="${i}" style="${pos(i)}">${stonesHTML(i, b[i], false, pal, o.dropAt === i)}<span class="cnt">${b[i]}</span>${extras(i)}</div>`;
+  for (let i = 12; i >= 7; i--) h += `<div class="pit popp ${cls(i)}" data-i="${i}" style="${pos(i)}">${stonesHTML(i, b[i], false, pal, o.dropAt === i)}<span class="hit"></span><span class="cnt">${b[i]}</span>${extras(i)}</div>`;
+  for (let i = 0; i < 6; i++) h += `<div class="pit pme ${cls(i)}" data-i="${i}" style="${pos(i)}">${stonesHTML(i, b[i], false, pal, o.dropAt === i)}<span class="hit"></span><span class="cnt">${b[i]}</span>${extras(i)}</div>`;
   h += store(6, o.meName ? esc(o.meName) : t('Senin hazinen'), 0);
   el.innerHTML = h;
   el.onclick = e => { const tg = e.target.closest('[data-i]'); if (tg && o.onClick) o.onClick(+tg.dataset.i, tg); };
@@ -504,11 +506,15 @@ async function animate(el, st0, p, pit, r, st1, base = {}) {
   const useHand = S.handAnim && base.hands && !base.instant;
   const B = o => ({ ...base, st: st0, ...o });
   let d = st0.b.slice();
-  const sfxDrop = idx => { if (idx === 6 || idx === 13) Sound.sfx.thunk(); else Sound.sfx.clack(); vib(6); };
+  const sfxDrop = (idx, k) => { if (idx === 6 || idx === 13) Sound.sfx.thunk(); else Sound.sfx.clack(k); vib(6); };
+  let kk = 0; const lastIdx = r.path.length - 1;
+  // slow-motion K.O.: maçı bitiren son taş yavaşlar, kamera yaklaşır, flaş patlar
+  const koIn = async idx => { const c = pitCenter(wrap, idx); Sound.sfx.riser(6); await FX.koZoom(wrap, c.x, c.y, true); await wait(650); };
+  const koOut = async () => { Sound.sfx.boom(); FX.flash('#fff', 750); FX.shake(1.4); await wait(450); await FX.koZoom(wrap, 0, 0, false); };
   if (base.instant) { renderBoard(el, st1.b, { ...base, st: st1 }); return; }
   if (!useHand) {
     d[pit] = 0; renderBoard(el, d, B({ active: pit })); Sound.sfx.grab(); await wait(sp * .8);
-    for (const idx of r.path) { d[idx]++; renderBoard(el, d, B({ active: idx, dropAt: idx })); sfxDrop(idx); await wait(sp * .8); }
+    for (const idx of r.path) { const ko = base.ko && kk === lastIdx; if (ko) await koIn(idx); d[idx]++; renderBoard(el, d, B({ active: idx, dropAt: idx })); sfxDrop(idx, kk++); await wait(sp * .8); if (ko) await koOut(); }
   } else {
     var hand = makeHand(wrap, p, base.hands[p]);
   }
@@ -520,10 +526,13 @@ async function animate(el, st0, p, pit, r, st1, base = {}) {
       await wait(sp * .35);
       let first = true;
       for (const idx of r.path) {
-        if (!(first && idx === pit)) { const c = pitCenter(wrap, idx); await hand.to(c.x, c.y, sp * .7); }
+        const ko = base.ko && kk === lastIdx;
+        if (!(first && idx === pit)) { const c = pitCenter(wrap, idx); await hand.to(c.x, c.y, sp * .7 * (ko ? 3 : 1)); }
         first = false;
-        d[idx]++; held--; hand.hold(held); renderBoard(el, d, B({ active: idx, dropAt: idx })); sfxDrop(idx);
+        if (ko) await koIn(idx);
+        d[idx]++; held--; hand.hold(held); renderBoard(el, d, B({ active: idx, dropAt: idx })); sfxDrop(idx, kk++);
         await hand.press(); await wait(sp * .25);
+        if (ko) await koOut();
       }
       hand.held = held;
     }
@@ -569,7 +578,8 @@ async function animateCard(el, st0, p, card, arg, st1, base = {}) {
 
 /* ---------- konfeti + arka plan parçacıkları ---------- */
 function confetti() {
-  const c = $('confetti'), x = c.getContext('2d'); c.width = innerWidth; c.height = innerHeight;
+  const c = $('confetti'), x = c.getContext('2d'), dpr = Math.min(3, devicePixelRatio || 1);
+  c.width = innerWidth * dpr; c.height = innerHeight * dpr; c.style.width = innerWidth + 'px'; c.style.height = innerHeight + 'px'; x.setTransform(dpr, 0, 0, dpr, 0, 0);
   const cols = ['#f2c14e', '#e5534b', '#4cc38a', '#5aa9e6', '#a77bf3', '#fff'];
   const P = Array.from({ length: 160 }, () => ({ x: innerWidth / 2 + (Math.random() - .5) * 200, y: innerHeight * .35, vx: (Math.random() - .5) * 14, vy: -Math.random() * 14 - 4,
     r: 4 + Math.random() * 5, c: cols[Math.floor(Math.random() * cols.length)], a: Math.random() * 6, va: (Math.random() - .5) * .3 }));
@@ -582,10 +592,12 @@ function confetti() {
 }
 (function dust() {
   const c = $('fx'), x = c.getContext('2d'); let P = [];
-  const resize = () => { c.width = innerWidth; c.height = innerHeight; P = Array.from({ length: Math.min(40, Math.round(innerWidth / 30)) }, () => ({ x: Math.random() * c.width, y: Math.random() * c.height, r: Math.random() * 2 + .5, v: Math.random() * .25 + .05, a: Math.random() * .4 + .1 })); };
+  const resize = () => { const dpr = Math.min(3, devicePixelRatio || 1), W = innerWidth, H = innerHeight;
+    c.width = W * dpr; c.height = H * dpr; c.style.width = W + 'px'; c.style.height = H + 'px'; x.setTransform(dpr, 0, 0, dpr, 0, 0);
+    P = Array.from({ length: Math.min(40, Math.round(W / 30)) }, () => ({ x: Math.random() * W, y: Math.random() * H, r: Math.random() * 2 + .5, v: Math.random() * .25 + .05, a: Math.random() * .4 + .1 })); };
   resize(); addEventListener('resize', resize);
-  (function loop() { if (!document.hidden && !matchMedia('(prefers-reduced-motion: reduce)').matches) { x.clearRect(0, 0, c.width, c.height);
-    for (const p of P) { p.y -= p.v; p.x += Math.sin(p.y / 60) * .2; if (p.y < -5) { p.y = c.height + 5; p.x = Math.random() * c.width; }
+  (function loop() { if (!document.hidden && !matchMedia('(prefers-reduced-motion: reduce)').matches) { x.clearRect(0, 0, innerWidth, innerHeight);
+    for (const p of P) { p.y -= p.v; p.x += Math.sin(p.y / 60) * .2; if (p.y < -5) { p.y = innerHeight + 5; p.x = Math.random() * innerWidth; }
       x.fillStyle = `rgba(255,210,140,${p.a})`; x.beginPath(); x.arc(p.x, p.y, p.r, 0, 7); x.fill(); } }
     setTimeout(() => requestAnimationFrame(loop), 50); })();
 })();
@@ -597,7 +609,7 @@ let curScreen = 'auth';
 const RENDER = {};
 function go(name) {
   if (name !== 'auth' && !AUTH.guest && !AUTH.token) name = 'auth';
-  if (name !== 'auth' && !S.tutorialDone) name = 'tutorial';
+  if (name !== 'auth' && !S.tutorialDone && !(name === 'game' && G && (G.kind === 'online' || G.kind === 'spectate'))) name = 'tutorial';
   if (curScreen === 'game' && name !== 'game' && G && !G.over && G.kind !== 'spectate' && G.kind !== 'puzzle') { leaveGameConfirm(name); return; }
   if (curScreen === 'game' && name !== 'game' && G && G.kind === 'spectate') netSend({ t: 'unspec' });
   ensurePeriods();
@@ -879,6 +891,13 @@ RENDER.settings = () => {
     <div class="set-row"><span>🔊 ${t('Efekt sesi')}</span><input type="range" min="0" max="1" step="0.05" value="${S.sfxVol}" oninput="S.sfxVol=+this.value;applySettings()" onchange="persist();Sound.sfx.clack()"></div>
     <div class="set-row"><span>📳 ${t('Titreşim (mobil)')}</span>${sw(S.haptics, 'S.haptics=!S.haptics')}</div>
     <div class="set-row"><span>✋ ${t('El animasyonu')}</span>${sw(S.handAnim, 'S.handAnim=!S.handAnim')}</div>
+    <div class="set-row"><div><div>📷 ${t('Kamera ile el kontrolü (deneysel)')}</div><div class="muted small">${t('Elini kameraya göster: yumruk yap = taşları al, elini aç = kuyuya bırak. Menülerde de aynı hareketle tıklarsın. Görüntü cihazından çıkmaz.')}</div></div>
+      <button class="switch ${S.camera ? 'on' : ''}" onclick="S.camera=!S.camera;persist();S.camera?Cam.start():Cam.stop();RENDER.settings()"></button></div>
+    <div class="set-row"><div><div>📺 ${t('Yayın Modu: Twitch Chat Plays')}</div><div class="muted small">${t('Rakibin yayın sohbetin olur; izleyiciler !kuyu 1-6 yazarak oy verir. Menü → Oyna → Chat\'e Karşı.')}</div></div>
+      <button class="switch ${S.chatMode ? 'on' : ''}" onclick="S.chatMode=!S.chatMode;persist();if(!S.chatMode)Chat.disconnect();else if(S.chatChannel)Chat.connect(S.chatChannel);RENDER.settings()"></button></div>
+    ${S.chatMode ? `<div class="set-row"><div>${t('Twitch kanal adı')}<div class="muted small">${{ ok: '🟢 ' + t('Bağlı') + ': #' + esc(Chat.channel), connecting: '🟡 ' + t('Bağlanıyor...'), error: '🔴 ' + t('Bağlanamadı'), lost: '🔴 ' + t('Bağlantı koptu'), off: '⚪ ' + t('Bağlı değil'), nochan: '⚪ ' + t('Kanal adı gir') }[Chat.state] || ''}</div></div>
+      <div class="row"><input class="inp" id="chch" style="width:170px" placeholder="kanal_adi" value="${esc(S.chatChannel || '')}"><label class="small muted">${t('Oy süresi')} <input class="inp" id="chsec" type="number" min="5" max="60" style="width:70px" value="${S.chatVoteSec || 15}"> ${t('sn')}</label>
+      <button class="btn sm" onclick="S.chatChannel=$('chch').value.trim();S.chatVoteSec=+$('chsec').value||15;persist();Chat.connect(S.chatChannel);setTimeout(()=>RENDER.settings(),300)">${t('Bağlan')}</button></div></div>` : ''}
     <div class="set-row"><span>⏩ ${t('Taş dağıtma hızı')}</span><div class="row">${sp('slow')}${sp('normal')}${sp('fast')}</div></div>
     <div class="set-row"><span>📱 ${t('Tahta düzeni')}</span><div class="row">${ly('auto')}${ly('h')}${ly('v')}</div></div>
     <div class="set-row"><div><div>📲 ${t('Uygulama olarak yükle')}</div><div class="muted small">${standalone ? t('Zaten uygulama olarak açık ✓') : installPrompt ? t('Ana ekrana ekle, tam ekran oyna.') : t('iPhone: Paylaş → Ana Ekrana Ekle. Android/PC: tarayıcı menüsü → Uygulamayı yükle.')}</div></div>${installPrompt && !standalone ? `<button class="btn sm" onclick="installPrompt.prompt();installPrompt=null">${t('Yükle')}</button>` : ''}</div>

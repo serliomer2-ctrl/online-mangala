@@ -134,6 +134,10 @@ const ACHS = [
   {id:'turnuva',icon:'🏆',name:'Turnuva Şampiyonu',en:'Tournament Champion',desc:'Bir turnuva kazan.',den:'Win a tournament.',reward:400,title:'sampiyon'},
   {id:'koleksiyon',icon:'🎒',name:'Koleksiyoncu',en:'Collector',desc:'25 eşyaya sahip ol.',den:'Own 25 items.',reward:300,title:'koleksiyoncu'},
   {id:'maraton',icon:'🏃',name:'Maratoncu',en:'Marathoner',desc:'100 oyun oyna.',den:'Play 100 games.',reward:500,title:'maratoncu'},
+  {id:'kombo3',icon:'🔥',name:'Kombo Kralı',en:'Combo King',desc:'Art arda 3 ekstra tur yap.',den:'Chain 3 extra turns in a row.',reward:200,title:'kombo_krali'},
+  {id:'masa_devir',icon:'🤬',name:'Masa Devirici',en:'Table Flipper',desc:'Kaybedince masayı devir.',den:'Flip the table after a loss.',reward:50,title:'masa_devirici'},
+  {id:'chat_yendi',icon:'📺',name:'Sohbeti Yendim',en:'Beat the Chat',desc:'Twitch sohbetine karşı kazan.',den:'Beat your Twitch chat.',reward:300,title:'yayinci'},
+  {id:'kamera_zafer',icon:'📷',name:'Jedi Ustası',en:'Jedi Master',desc:'Kamera ile el kontrolünü kullanarak kazan.',den:'Win using camera hand control.',reward:300,title:'jedi'},
   {id:'sezon30',icon:'🎫',name:'Sezon Efsanesi',en:'Season Legend',desc:'Sezon Kartında 30. kademeye ulaş.',den:'Reach tier 30 of the Season Pass.',reward:500}
 ];
 const TITLES = {
@@ -141,7 +145,8 @@ const TITLES = {
   taktik_dehasi:{name:'Taktik Dehası',en:'Tactical Genius'}, efsane_avcisi:{name:'Efsane Avcısı',en:'Legend Slayer'}, yildirim:{name:'Yıldırım Hızında',en:'Lightning Fast'},
   kaos_krali:{name:'Kaos Kralı',en:'King of Chaos'}, ters_kose:{name:'Ters Köşe',en:'Upside Down'}, hesap_makinesi:{name:'Hesap Makinesi',en:'The Calculator'},
   altin_kol:{name:'Altın Kol',en:'Golden Arm'}, mangala_ustasi:{name:'Mangala Ustası',en:'Mangala Master'}, sampiyon:{name:'Turnuva Şampiyonu',en:'Tournament Champion'},
-  koleksiyoncu:{name:'Koleksiyoncu',en:'Collector'}, maratoncu:{name:'Maratoncu',en:'Marathoner'}
+  koleksiyoncu:{name:'Koleksiyoncu',en:'Collector'}, kombo_krali:{name:'Kombo Kralı',en:'Combo King'}, masa_devirici:{name:'Masa Devirici',en:'Table Flipper'},
+  yayinci:{name:'Yayın Yıldızı',en:'Stream Star'}, jedi:{name:'Jedi Ustası',en:'Jedi Master'}, maratoncu:{name:'Maratoncu',en:'Marathoner'}
 };
 const PUZZLE_TEXT = {
   even:{tr:'Tek turda <b>çift sayı kuralıyla</b> en az <b>{0} taş</b> kap.',en:'Capture at least <b>{0} stones</b> with the <b>even rule</b> in one turn.'},
