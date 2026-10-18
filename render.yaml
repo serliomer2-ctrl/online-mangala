@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: mangala-online
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: MONGODB_URI        # MongoDB Atlas bağlantı adresi (hesaplar kalıcı olsun diye ŞART)
+        sync: false
+      - key: ADMIN_PASSWORD     # admin hesabının ilk şifresi (boş bırakılırsa "admin")
+        sync: false
+      - key: BREVO_API_KEY      # e-posta ile kod göndermek için (isteğe bağlı)
+        sync: false
+      - key: MAIL_FROM          # Brevo'da doğruladığın gönderici e-posta adresi
+        sync: false
