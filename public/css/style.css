@@ -613,3 +613,141 @@ a.btn{text-decoration:none;display:inline-block}
 .vote-tag i{position:absolute;left:0;bottom:0;height:4px;background:#a77bf3;transition:width .3s}
 .vote-tag.off{opacity:.35}
 .chatfeed{width:100%;text-align:center;font-size:13px;color:#d9c6ff;min-height:18px}
+
+/* ===== v3.3: karşılama + oyun rehberi ===== */
+.welcome{max-width:760px;margin:6vh auto 0;text-align:center}
+.welcome .w-ic{font-size:72px;animation:float 5s ease-in-out infinite}
+.welcome h1{font-size:clamp(32px,6vw,52px);margin:6px 0;background:linear-gradient(#fff2b8,#f2c14e 45%,#c27d12);-webkit-background-clip:text;background-clip:text;color:transparent}
+.welcome h2{margin:6px 0 18px}
+.w-btns{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin:10px 0 14px}
+.w-opt{text-align:center;padding:24px}
+.w-opt .ic{font-size:54px}
+.w-opt h3{font-size:22px;color:var(--gold)}
+.guide{max-width:820px;margin:3vh auto 0}
+.g-dots{display:flex;gap:6px;justify-content:center;margin:14px 0;flex-wrap:wrap}
+.g-dots i{width:10px;height:10px;border-radius:50%;background:#3a2617;cursor:pointer;transition:all .3s}
+.g-dots i.done{background:var(--gold2)}
+.g-dots i.on{background:var(--gold);width:28px;border-radius:99px;box-shadow:0 0 10px var(--gold)}
+.g-card{text-align:center;padding:28px 22px;animation:gin .45s cubic-bezier(.2,1.3,.4,1);min-height:340px}
+@keyframes gin{from{opacity:0;transform:translateX(40px) scale(.97)}}
+.g-card .g-ic{font-size:76px;animation:float 4s ease-in-out infinite;filter:drop-shadow(0 8px 16px rgba(0,0,0,.5))}
+.g-card h2{color:var(--gold);margin:8px 0}
+.g-card p{font-size:17px;line-height:1.65;max-width:620px;margin:0 auto 14px}
+.g-card b{color:var(--gold)}
+.g-chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.g-chip{background:#2a1b11;border:1px solid var(--line);border-radius:99px;padding:6px 14px;font-weight:800;font-size:15px}
+.g-modes{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;text-align:left}
+.g-mode{background:#2a1b11;border:1px solid var(--line);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:2px}
+.g-mode span{font-size:26px}
+.g-mode small{color:var(--muted);font-size:12px;line-height:1.35}
+.g-nav{margin-top:14px}
+
+/* ===== v3.5: yan yana, günlük bulmaca, önizleme, geçmiş, arka plan & zafer efektleri ===== */
+.locnames { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.locnames .mini-f { flex: 1; min-width: 150px; }
+.locnames .vs { font-weight: 900; color: var(--gold); padding-bottom: 10px; }
+.btn .cnt { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: rgba(0,0,0,.3); font-size: 11px; margin-left: 2px; }
+.pv-land { outline: 3px dashed #ffd76a; outline-offset: -4px; }
+.pvtag { position: absolute; left: 50%; top: -10px; transform: translate(-50%, -100%); z-index: 6; pointer-events: none; white-space: nowrap;
+  background: #2a1a10; color: #fff; border: 1px solid #ffd76a; border-radius: 10px; padding: 2px 8px; font-size: 12px; font-weight: 800; box-shadow: 0 4px 10px rgba(0,0,0,.4); animation: pvpop .18s ease-out; }
+.pvtag.cap { border-color: #4cc38a; background: #123b26; }
+.pvtag.ext { border-color: #7bd3ff; background: #12304a; }
+.board.v .pvtag { top: 50%; left: auto; right: -6px; transform: translate(100%, -50%); }
+@keyframes pvpop { from { opacity: 0; margin-top: 6px; } to { opacity: 1; margin-top: 0; } }
+.dailypz { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; background: linear-gradient(135deg, #3d2a73, #1d3557); border-color: #8f6ad6; }
+.dailypz.done { border-color: var(--green); }
+.dpz-ic { font-size: 46px; animation: dpzbob 2.6s ease-in-out infinite; }
+@keyframes dpzbob { 50% { transform: translateY(-4px) rotate(-6deg); } }
+.mcard .note.new { background: #e5534b; color: #fff; }
+.histsvg { width: 100%; height: 120px; display: block; background: rgba(0,0,0,.18); border-radius: 10px; }
+.formb { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; font-weight: 900; font-size: 12px; color: #fff; }
+.formb.w { background: #2f9e62; } .formb.l { background: #c9423a; } .formb.d { background: #6c727a; }
+.mrow { display: grid; grid-template-columns: minmax(110px, 1.2fr) 2fr 48px 64px; gap: 8px; align-items: center; padding: 4px 0; font-size: 14px; }
+.mrow .pbar-g { margin: 0; }
+.bgprev { position: relative; overflow: hidden; height: 84px; cursor: pointer; background: radial-gradient(circle at 50% 120%, #3b2a5a, #120c22); }
+.bgprev span { position: absolute; top: -20px; left: calc(8% + var(--k) * 19%); font-size: 18px; animation: bgfall 3.2s linear infinite; animation-delay: calc(var(--k) * -.7s); }
+.bgprev.bg-deniz span, .bgprev.bg-yok span, .bgprev.bg-atesbocegi span { animation-name: bgrise; top: auto; bottom: -20px; }
+.bgprev.bg-yildiz span { animation: bgtw 1.8s ease-in-out infinite; animation-delay: calc(var(--k) * -.35s); top: calc(10% + var(--k) * 13%); font-size: 13px; }
+.bgprev small, .fxprev small { position: absolute; right: 6px; bottom: 4px; font-size: 10px; opacity: .8; }
+@keyframes bgfall { to { transform: translate(14px, 120px) rotate(200deg); } }
+@keyframes bgrise { to { transform: translate(-8px, -120px); opacity: .2; } }
+@keyframes bgtw { 50% { opacity: .2; transform: scale(.6); } }
+.fxprev { position: relative; height: 84px; cursor: pointer; display: grid; place-items: center; background: radial-gradient(circle, #4a2f1a, #1a0f08); }
+.fxprev .fxic { font-size: 40px; animation: fxpulse 1.4s ease-in-out infinite; }
+@keyframes fxpulse { 50% { transform: scale(1.18) rotate(-8deg); } }
+@media (max-width: 560px) { .mrow { grid-template-columns: 1fr 1.3fr 40px; } .mrow > span:last-child { display: none; } }
+@media (prefers-reduced-motion: reduce) { .bgprev span, .fxprev .fxic, .dpz-ic { animation: none; } }
+
+/* ===== v3.6 grafik yenilemesi (Yüksek kalite) + çark, ısı haritası, indirim, şerit ===== */
+/* tahta: ahşap damarı + ışık vinyeti */
+.gfx-high .board::before{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  background:radial-gradient(ellipse at 50% -10%,rgba(255,240,200,.22),transparent 55%),radial-gradient(ellipse at 50% 120%,rgba(0,0,0,.35),transparent 60%),
+  repeating-linear-gradient(92deg,rgba(255,255,255,.035) 0 2px,transparent 2px 9px,rgba(0,0,0,.04) 9px 11px,transparent 11px 23px);mix-blend-mode:overlay}
+/* kuyular: daha derin, ağız kenarı parlak */
+.gfx-high .pit,.gfx-high .store{box-shadow:inset 0 10px 18px rgba(0,0,0,.75),inset 0 -4px 6px rgba(255,255,255,.18),inset 0 0 0 1px rgba(0,0,0,.25),0 2px 0 rgba(255,255,255,.28),0 -1px 0 rgba(0,0,0,.35)}
+/* taşlar: cam gibi parlama + yumuşak gölge */
+.gfx-high .st{background:radial-gradient(circle at 30% 24%,rgba(255,255,255,.98) 0 5%,rgba(255,255,255,.35) 12%,transparent 30%),radial-gradient(circle at 68% 78%,rgba(255,255,255,.22),transparent 28%),
+  radial-gradient(circle at 50% 50%,color-mix(in srgb,var(--c) 92%,#fff) 20%,var(--c) 48%,color-mix(in srgb,var(--c) 45%,#000) 100%);
+  box-shadow:1px 4px 4px rgba(0,0,0,.55),0 1px 1px rgba(0,0,0,.4),inset -2px -3px 5px rgba(0,0,0,.35),inset 1px 1px 2px rgba(255,255,255,.3)}
+/* sıran gelince oynanabilir kuyular hafifçe nefes alır */
+.gfx-high .pit.click:not(.target):not(.hl):not(.pv-land){animation:breathe 2.6s ease-in-out infinite}
+@keyframes breathe{50%{box-shadow:inset 0 10px 18px rgba(0,0,0,.7),0 0 0 2px rgba(242,193,78,.4),0 0 16px rgba(242,193,78,.28)}}
+/* taş düşünce halka */
+.gfx-high .pit:has(> .st.drop) > .hit,.gfx-high .store:has(> .st.drop) > .hit{animation:ripple .55s ease-out}
+@keyframes ripple{from{box-shadow:0 0 0 0 rgba(255,230,160,.6)}to{box-shadow:0 0 0 16px rgba(255,230,160,0)}}
+/* sayılar cam rozet */
+.gfx-high .pit .cnt{background:linear-gradient(180deg,rgba(60,36,18,.92),rgba(10,6,3,.82));border:1px solid rgba(255,220,150,.3);box-shadow:0 2px 6px rgba(0,0,0,.45)}
+/* hazine skoru artınca parlama */
+.scbump{animation:scbump .55s cubic-bezier(.3,1.8,.5,1)}
+@keyframes scbump{40%{transform:scale(1.45);color:#ffe066;text-shadow:0 0 14px #ffd76a}}
+.gfx-high .store.sglow{animation:sglow .9s ease-out}
+@keyframes sglow{30%{box-shadow:inset 0 10px 18px rgba(0,0,0,.6),0 0 0 3px #ffd76a,0 0 30px rgba(255,215,106,.7)}}
+/* oyuncu çubuğu: sıradaki oyuncuda akan altın kenar */
+.gfx-high .pbar.turn{background-image:linear-gradient(90deg,rgba(242,193,78,.12),transparent 40%,rgba(242,193,78,.12));background-size:200% 100%;animation:barflow 3s linear infinite}
+@keyframes barflow{to{background-position:-200% 0}}
+/* menü & mağaza kartları: 3B eğim + ışık yansıması */
+.gfx-high .mcard,.gfx-high .card.item{position:relative;transition:transform .18s ease-out,border-color .15s,box-shadow .2s;will-change:transform}
+.gfx-high .mcard:hover,.gfx-high .card.item:hover{transform:perspective(800px) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg)) translateY(-4px);box-shadow:0 14px 28px rgba(0,0,0,.45),0 0 0 1px rgba(242,193,78,.35)}
+.gfx-high .mcard::after,.gfx-high .card.item::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:radial-gradient(circle at var(--mx,50%) var(--my,0%),rgba(255,255,255,.16),transparent 55%);opacity:0;transition:opacity .2s}
+.gfx-high .mcard:hover::after,.gfx-high .card.item:hover::after{opacity:1}
+.gfx-high .mcard .ic{transition:transform .25s cubic-bezier(.3,1.7,.5,1)}
+.gfx-high .mcard:hover .ic{transform:scale(1.15) rotate(-6deg)}
+.gfx-high .btn{transition:transform .1s,filter .15s}
+.gfx-high .btn:hover:not(:disabled){filter:brightness(1.1)}
+.gfx-high .btn:active:not(:disabled){transform:scale(.96)}
+.gfx-high .hero h1{background:linear-gradient(100deg,#f2c14e 0%,#fff3c4 22%,#f2c14e 40%,#d9962b 100%);background-size:250% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:shimmer 6s linear infinite}
+@keyframes shimmer{to{background-position:-250% 0}}
+.gfx-high .screen.on:not(#scr-game){animation:scrIn .32s cubic-bezier(.2,.8,.2,1)}
+@keyframes scrIn{from{opacity:0;transform:translateY(10px)}}
+/* düşük kalite: süs animasyonları ve arka plan parçacıkları kapalı */
+.gfx-low #fx{display:none}
+.gfx-low .bgprev span,.gfx-low .dpz-ic,.gfx-low .fxprev .fxic,.gfx-low .spinic,.gfx-low .tk-in{animation:none!important}
+.gfx-low .st{box-shadow:none}
+.gfx-low *{backdrop-filter:none!important}
+/* şans çarkı */
+.wheelwrap{position:relative;width:min(340px,86vw);margin:10px auto 0;filter:drop-shadow(0 14px 24px rgba(0,0,0,.55))}
+.wheel{width:100%;display:block;border-radius:50%;border:8px solid #6b3e1c;box-shadow:inset 0 0 0 3px #f2c14e,0 0 0 3px #2a1a10;background:#2a1a10}
+.wpointer{position:absolute;left:50%;top:-14px;transform:translateX(-50%);z-index:2;font-size:34px;color:#ffd76a;text-shadow:0 3px 0 #8a4b12,0 6px 10px rgba(0,0,0,.6)}
+.btn.big{font-size:20px;padding:14px 28px;animation:bigbtn 1.6s ease-in-out infinite}
+@keyframes bigbtn{50%{box-shadow:0 0 0 6px rgba(242,193,78,.25),0 0 26px rgba(242,193,78,.5)}}
+.wprizes{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.wpz{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 10px}
+.wpz i{width:14px;height:14px;border-radius:4px;flex:none}
+.wpz b{flex:1;font-size:14px}
+.wheelcard{background:linear-gradient(135deg,#6b2fa8,#c2255c)!important;border-color:#f06595!important}
+.spinic{display:inline-block;animation:spinslow 9s linear infinite}
+@keyframes spinslow{to{transform:rotate(360deg)}}
+.gfx-high .wheelcard:hover .ic{transform:none}
+/* ısı haritası */
+.heat{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+.hc{aspect-ratio:1;border-radius:50%;display:grid;place-items:center;align-content:center;background:radial-gradient(circle,rgba(255,90,40,calc(.15 + var(--h) * .85)),rgba(255,190,60,calc(var(--h) * .5)) 60%,rgba(0,0,0,.35));box-shadow:inset 0 6px 12px rgba(0,0,0,.5),0 0 calc(var(--h) * 18px) rgba(255,120,40,calc(var(--h) * .6))}
+.hc b{font-size:clamp(11px,2.6vw,16px);text-shadow:0 1px 3px #000}
+.hc small{opacity:.7;font-size:11px}
+/* indirim + duyuru şeridi */
+.salebar{background:linear-gradient(90deg,#c92a2a,#e8590c);border-radius:12px;padding:10px 14px;margin:-4px 0 12px;font-size:15px;box-shadow:0 6px 18px rgba(201,42,42,.35)}
+.ticker{overflow:hidden;white-space:nowrap;background:linear-gradient(90deg,rgba(242,193,78,.18),rgba(242,193,78,.08));border:1px solid rgba(242,193,78,.4);border-radius:12px;margin-bottom:12px;padding:8px 0;font-weight:700}
+.tk-in{display:inline-block;padding-left:100%;animation:ticker 26s linear infinite}
+@keyframes ticker{to{transform:translateX(-100%)}}
+.set-row.wrap{flex-wrap:wrap;gap:8px}
+.chips.sm .chip{padding:6px 10px;font-size:13px}
+@media (prefers-reduced-motion: reduce){.gfx-high .pit.click,.gfx-high .hero h1,.spinic,.tk-in,.btn.big,.gfx-high .pbar.turn{animation:none!important}}

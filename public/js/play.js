@@ -11,7 +11,7 @@ const xpFor = (res, bot, online) => { let x = { win: 120, draw: 70, loss: 40 }[r
 /* ---------- Oyun ekranı ---------- */
 function gBase() {
   if (G.kind === 'spectate') return { oppName: G.players[1].name, meName: G.players[0].name, hands: [G.players[0].hand || 'klasik', G.players[1].hand || 'klasik'] };
-  return { oppName: G.opp.name, hands: [S.eq.hand, G.opp.hand || 'klasik'] };
+  return { oppName: G.opp.name, meName: G.kind === 'local' ? G.names[0] : undefined, hands: [S.eq.hand, G.opp.hand || 'klasik'] };
 }
 function setupGameUI() {
   const fxl = document.querySelector('#scr-game .fxlayer'); if (fxl) fxl.innerHTML = '';
@@ -22,7 +22,7 @@ function setupGameUI() {
   $('g-av1').style.cursor = $('g-av1').onclick ? 'pointer' : '';
   $('g-nm1').innerHTML = line(o, o.label || (o.elo ? leagueBadge(o.elo) + ' ' + o.elo : (o.level ? t('Sv') + ' ' + o.level : '')));
   if (me) { $('g-av0').innerHTML = avatarHTML(me.avatar, me.frame, 42); $('g-nm0').innerHTML = line(me, me.elo ? leagueBadge(me.elo) + ' ' + me.elo : ''); }
-  else { $('g-av0').innerHTML = avatarHTML(S.eq.avatar, S.eq.frame, 42); $('g-nm0').innerHTML = line({ name: myName(), title: S.title, rank: AUTH.user && AUTH.user.rank }, AUTH.user && G.ranked ? leagueBadge(AUTH.user.elo) + ' ' + AUTH.user.elo : t('Sv') + ' ' + levelInfo(S.xp).L); }
+  else { $('g-av0').innerHTML = avatarHTML(S.eq.avatar, S.eq.frame, 42); $('g-nm0').innerHTML = G.kind === 'local' ? line({ name: G.names[0] }, t('Oyuncu 1')) : line({ name: myName(), title: S.title, rank: AUTH.user && AUTH.user.rank }, AUTH.user && G.ranked ? leagueBadge(AUTH.user.elo) + ' ' + AUTH.user.elo : t('Sv') + ' ' + levelInfo(S.xp).L); }
   $('g-think').textContent = ''; ['bub0', 'bub1'].forEach(b => $(b).className = 'bubble');
   const bn = $('g-banner');
   if (G.mode !== 'classic' && G.kind !== 'puzzle') { bn.style.display = ''; bn.innerHTML = `${MODES[G.mode].icon} <b>${nm(MODES[G.mode])}</b> — ${dsc(MODES[G.mode])}`; } else bn.style.display = 'none';
@@ -31,25 +31,27 @@ function setupGameUI() {
 }
 function renderActions() {
   const a = $('g-actions');
-  if (G.kind === 'puzzle') a.innerHTML = `<button class="btn sec sm" onclick="startPuzzle(G.puzzle.idx)">🔄 ${t('Sıfırla')}</button><button class="btn sec sm" onclick="puzzleHint()">💡 ${t('İpucu')}</button><button class="btn sec sm" onclick="showRulesModal()">📜</button><button class="btn red sm" onclick="G=null;go('puzzles')">✖ ${t('Çık')}</button>`;
+  if (G.kind === 'puzzle') a.innerHTML = `<button class="btn sec sm" onclick="restartPuzzle()">🔄 ${t('Sıfırla')}</button><button class="btn sec sm" onclick="puzzleHint()">💡 ${t('İpucu')}</button><button class="btn sec sm" onclick="showRulesModal()">📜</button><button class="btn red sm" onclick="G=null;go('puzzles')">✖ ${t('Çık')}</button>`;
   else if (G.kind === 'spectate') a.innerHTML = `<button class="btn sec sm" onclick="showRulesModal()">📜 ${t('Kurallar')}</button><button class="btn red sm" onclick="stopSpectate()">👁️ ${t('İzlemeyi Bırak')}</button>`;
   else if (G.kind === 'chat') a.innerHTML = `<span class="muted small">🧪 ${t('Test oyu')}:</span>${[1, 2, 3, 4, 5, 6].map(n => `<button class="btn sec xs" onclick="Chat.testVote(${n})">!kuyu ${n}</button>`).join('')}<button class="btn sec sm" onclick="showRulesModal()">📜</button><button class="btn red sm" onclick="resign()">🏳️ ${t('Pes Et')}</button><div id="chatfeed" class="chatfeed"></div>`;
-  else a.innerHTML = `<button class="btn sec sm" onclick="togglePanel('e')">😀 ${t('Emoji')}</button><button class="btn sec sm" onclick="togglePanel('m')">💬 ${t('Mesaj')}</button><button class="btn sec sm" onclick="showRulesModal()">📜</button><button class="btn red sm" onclick="resign()">🏳️ ${t('Pes Et')}</button>`;
+  else if (G.kind === 'local') a.innerHTML = `<button class="btn sec sm" onclick="showRulesModal()">📜 ${t('Kurallar')}</button><button class="btn red sm" onclick="resign()">🏳️ ${t('Pes Et')}</button>`;
+  else a.innerHTML = (G.kind === 'bot' ? assistBtns() : '') + `<button class="btn sec sm" onclick="togglePanel('e')">😀 ${t('Emoji')}</button><button class="btn sec sm" onclick="togglePanel('m')">💬 ${t('Mesaj')}</button><button class="btn sec sm" onclick="showRulesModal()">📜</button><button class="btn red sm" onclick="resign()">🏳️ ${t('Pes Et')}</button>`;
 }
 function setStatus(m, c = '') { const s = $('gstatus'); s.innerHTML = m; s.className = c; }
-const myTurn = () => G && !G.over && !G.busy && G.st.turn === 0 && G.kind !== 'spectate';
+const hp = () => G && G.kind === 'local' ? G.st.turn : 0;   // sırası gelen yerel oyuncu (yan yana modunda iki kişi)
+const myTurn = () => G && !G.over && !G.busy && G.st.turn === hp() && G.kind !== 'spectate';
 function gRender() {
   if (!G) return;
   const o = { ...gBase(), st: G.st, onClick: gClick };
   if (myTurn()) {
     if (G.cardSel) o.tgt = new Set(G.cardSel === 'swap' ? Engine.cardOptions(G.st, 0, 'swap') : Engine.cardOptions(G.st, 0, G.cardSel));
-    else o.click = new Set(Engine.legalMoves(G.st, 0));
+    else o.click = new Set(Engine.legalMoves(G.st, hp()));
     if (G.hint != null) o.target = G.hint;
   }
   renderBoard($('gboard'), G.st.b, o);
   $('g-s0').textContent = Engine.score(G.st, 0); $('g-s1').textContent = Engine.score(G.st, 1);
   $('pb0').classList.toggle('turn', G.st.turn === 0 && !G.over); $('pb1').classList.toggle('turn', G.st.turn === 1 && !G.over);
-  $('g-me').textContent = myTurn() ? (G.cardSel ? t('Kart için hedef seç') : t('Senin sıran')) : '';
+  $('g-me').textContent = myTurn() ? (G.cardSel ? t('Kart için hedef seç') : G.kind === 'local' ? t('Sıra: {0}', G.names[G.st.turn]) : t('Senin sıran')) : '';
   renderCards();
 }
 function renderCards() {
@@ -78,14 +80,14 @@ function gClick(i, el) {
     if (!opts.includes(i)) { el.classList.add('shake'); Sound.sfx.error(); return; }
     const c = G.cardSel; G.cardSel = null; sendAct({ type: 'card', card: c, arg: i }); return;
   }
-  if (!isPit(0, i)) { toast(i === 6 || i === 13 ? t('Hazineden oynanmaz.') : t('Sadece kendi kuyularından oynayabilirsin.')); Sound.sfx.error(); return; }
-  if (!Engine.legalMoves(G.st, 0).includes(i)) { el.classList.add('shake'); Sound.sfx.error(); vib(40); toast(G.st.frozen && G.st.frozen.pit === i ? '❄️ ' + t('Bu kuyu donduruldu!') : t('Boş kuyu oynanamaz.')); return; }
+  if (!isPit(hp(), i)) { toast(i === 6 || i === 13 ? t('Hazineden oynanmaz.') : t('Sadece kendi kuyularından oynayabilirsin.')); Sound.sfx.error(); return; }
+  if (!Engine.legalMoves(G.st, hp()).includes(i)) { el.classList.add('shake'); Sound.sfx.error(); vib(40); toast(G.st.frozen && G.st.frozen.pit === i ? '❄️ ' + t('Bu kuyu donduruldu!') : t('Boş kuyu oynanamaz.')); return; }
   sendAct({ type: 'move', pit: i });
 }
 function sendAct(act) {
   G.hint = null; clearBlitz();
   if (G.kind === 'online') { G.busy = true; gRender(); netSend(act.type === 'move' ? { t: 'move', pit: act.pit } : { t: 'card', card: act.card, arg: act.arg }); return; }
-  doAct(0, act);
+  doAct(hp(), act);
 }
 /* Bir hamleyi görsel olarak uygula; stNext verilirse (sunucu) son durum odur */
 async function playAct(p, act, stNext) {
@@ -98,7 +100,7 @@ async function playAct(p, act, stNext) {
     const oppBefore = Engine.sideSum(st0.b, 1 - p);
     await animate($('gboard'), st0, p, act.pit, r, st1, { ...gBase(), ko: !!st1.over && G.kind !== 'puzzle' });
     comboFx(p, r);
-    if (p === 0 && G.kind !== 'spectate') afterMyMove(st0, st1, r, oppBefore);
+    if (p === 0 && G.kind !== 'spectate' && G.kind !== 'local') afterMyMove(st0, st1, r, oppBefore);
   } else {
     st1 = stNext || Engine.useCard(st0, p, act.card, act.arg);
     if (!st1) return null;
@@ -126,7 +128,7 @@ function afterMyMove(st0, st1, r, oppBefore) {
 }
 function statusFor(p, out) {
   if (!out) return ['', ''];
-  const { r, act } = out, who = p === 0 ? (G.kind === 'spectate' ? G.players[0].name : t('Sen')) : (G.kind === 'spectate' ? G.players[1].name : G.opp.name), me = p === 0 && G.kind !== 'spectate';
+  const { r, act } = out, who = G.kind === 'local' ? G.names[p] : p === 0 ? (G.kind === 'spectate' ? G.players[0].name : t('Sen')) : (G.kind === 'spectate' ? G.players[1].name : G.opp.name), me = p === 0 && G.kind !== 'spectate' && G.kind !== 'local';
   if (act.type === 'card') return [`${CARDS[act.card].icon} ${me ? t('{0} kartını kullandın!', nm(CARDS[act.card])) : t('{0} {1} kartını kullandı!', esc(who), nm(CARDS[act.card]))}`, 'info'];
   if (r.blocked) return [`🛡️ ${t('Kalkan taşları korudu!')}`, 'info'];
   if (r.cap && r.cap.type === 'even') return [me ? '💰 ' + t('Çift sayı kuralı! {0} taş kazandın.', r.cap.amount) : '⚠️ ' + t('{0} çift sayı kuralıyla {1} taş aldı.', esc(who), r.cap.amount), me ? 'good' : 'bad'];
@@ -139,6 +141,7 @@ async function doAct(p, act) {
   if (!G || G.over) return;
   G.busy = true; gRender();
   const g = G;
+  if (p === 0 && G.kind === 'bot') pushUndo();
   if (p === 0 && act.type === 'move') G.scoreHist.push(Engine.score(G.st, 0) - Engine.score(G.st, 1));
   const out = await playAct(p, act);
   if (G !== g || !out) { if (G === g) { G.busy = false; gRender(); } return; }
@@ -146,7 +149,7 @@ async function doAct(p, act) {
   if (G.st.over) { G.busy = false; return endGame(out.r, {}); }
   const [msg, cls] = statusFor(p, out);
   if (G.st.turn === 0 && p === 1) G.turnGain = 0;
-  setStatus(msg || (G.st.turn === 0 ? t('Senin sıran. Bir kuyu seç.') : `${esc(G.opp.name)} ${t('düşünüyor...')}`), cls);
+  setStatus(msg || (G.kind === 'local' ? '👉 ' + t('Sıra: {0}', esc(G.names[G.st.turn])) : G.st.turn === 0 ? t('Senin sıran. Bir kuyu seç.') : `${esc(G.opp.name)} ${t('düşünüyor...')}`), cls);
   G.busy = false; gRender();
   if (G.kind === 'chat') { if (G.st.turn === 1) setTimeout(() => G && G.kind === 'chat' && !G.over && Chat.startVote(), 700); else Chat.drawVotes(); }
   if (G.kind === 'bot' || G.kind === 'btour') {
@@ -218,6 +221,7 @@ async function resignNow() {
 async function endGame(r, opt = {}) {
   if (!G || G.over) return;
   G.over = true; G.busy = false; clearBlitz(); setTimer(0, null); closePanel(); gRender();
+  if (G.kind === 'local') return localEnd(r, opt);
   const online = G.kind === 'online', bot = G.bot, mode = G.mode;
   const me = Engine.score(G.st, 0), op = Engine.score(G.st, 1);
   let outcome;
@@ -231,7 +235,8 @@ async function endGame(r, opt = {}) {
   if (G.kind === 'btour') coins = 0;
   if (opt.resignedMe) coins = 0;
   coins *= coinMult();
-  const xp = opt.resignedMe ? 10 : Math.round(xpFor(outcome, bot, online) * (curEvent().xpMult || 1));
+  if (G.assisted) coins = Math.round(coins / 2);
+  const xp = opt.resignedMe ? 10 : Math.round(xpFor(outcome, bot, online) * (curEvent().xpMult || 1) * (G.assisted ? 0.5 : 1));
   const T = S.totals; T.games++; if (outcome === 'win') T.wins++; if (outcome === 'draw') T.draws++;
   if (online) { T.online++; if (outcome === 'win') T.onlineWins++; }
   if (!opt.reason) T.best = Math.max(T.best, me);
@@ -242,7 +247,7 @@ async function endGame(r, opt = {}) {
   // başarımlar
   if (outcome === 'win') {
     S.streak++; unlockAch('ilk_zafer'); if (S.streak >= 5) unlockAch('seri5');
-    if (bot) { if (bot.id === 'efsane') unlockAch('efsane_avcisi'); if (!S.botsBeaten.includes(bot.id)) S.botsBeaten.push(bot.id); if (S.botsBeaten.length >= BOTS.length) unlockAch('tum_botlar'); }
+    if (bot) { if (bot.stars >= 4 && !G.assisted) unlockAch('geri_almadan'); if (bot.id === 'efsane') unlockAch('efsane_avcisi'); if (!S.botsBeaten.includes(bot.id)) S.botsBeaten.push(bot.id); if (S.botsBeaten.length >= BOTS.length) unlockAch('tum_botlar'); }
     if (mode === 'blitz') unlockAch('yildirim'); if (PARTY.includes(mode)) unlockAch('kaos'); if (mode === 'reverse') unlockAch('ters_dahi');
     if (G.kind === 'chat') unlockAch('chat_yendi'); if (Cam.on) unlockAch('kamera_zafer');
     if (online) unlockAch('online_zafer'); if (me >= 36 && mode !== 'reverse') unlockAch('ezici');
@@ -251,7 +256,7 @@ async function endGame(r, opt = {}) {
   if (T.games >= 100) unlockAch('maraton');
   if (coins) S.coins += coins;
   if (opt.elo && AUTH.user) { AUTH.user.elo = opt.elo.elo; checkLeague(opt.elo.elo); }
-  saveReplay(outcome, me, op);
+  saveReplay(outcome, me, op); pushHist(outcome, me, op);
   persist();
   const xr = addXP(xp);
   if (outcome === 'win') { Sound.sfx.win(); Sound.sfx.cheer(); confetti(); vib([40, 60, 40, 60, 80]); } else if (outcome === 'loss') Sound.sfx.defeat();
@@ -265,13 +270,15 @@ async function endGame(r, opt = {}) {
   setStatus(`${big} ${title} — ${me} : ${op}`, outcome === 'win' ? 'good' : outcome === 'loss' ? 'bad' : 'info');
   updTop(true);
   const rw = [coins ? `+${coins} 🪙${coinMult() > 1 ? ' (2x)' : ''}` : '', `+${xp} XP`, xr.levelUp ? `⬆ ${t('Seviye')} ${xr.levelUp}! +${xr.lvCoins} 🪙` : '', xr.tierUp ? `🎫 ${t('Kademe')} ${xr.tierUp}!` : '',
-    opt.elo ? `${leagueBadge(opt.elo.elo)} ${opt.elo.elo} (${opt.elo.delta > 0 ? '+' : ''}${opt.elo.delta})` : ''].filter(Boolean);
+    G.assisted ? '🤝 ' + t('Yardımlı maç: ödül yarı') : '', opt.elo ? `${leagueBadge(opt.elo.elo)} ${opt.elo.elo} (${opt.elo.delta > 0 ? '+' : ''}${opt.elo.delta})` : ''].filter(Boolean);
   const html = `<div class="big">${big}</div><h3>${title}</h3>${mode === 'reverse' ? `<p class="small" style="color:#d9c6ff">🔄 ${t('Ters modda az taş kazanır')}</p>` : ''}<p style="font-size:21px;font-weight:900">${esc(myName())} ${me} — ${op} ${esc(G.opp.name)}</p>${endTxt}<div class="rewards">${rw.map(x => `<span>${x}</span>`).join('')}</div>`;
   if (!online && Math.random() < .6) setTimeout(() => G && showEmote(1, 'm', outcome === 'win' ? 'temel:2' : 'temel:1'), 400);
   const hasReplay = G.acts && G.acts.length > 0;
   await wait(opt.reason ? 300 : 1200);
   const rageBtn = outcome === 'loss' ? [{ label: '🤬 ' + t('Masayı Devir'), cls: 'red', value: 'rage' }] : [];
-  const ask = async (h, btns) => { let v; while ((v = await modal(h, btns)) === 'rage') await rageQuit(); return v; };
+  const shareInfo = { me, op, myName: myName(), oppName: G.opp.name, outcome, mode, board: G.st.b.slice() };
+  const shareBtn = [{ label: '📸 ' + t('Paylaş'), cls: 'sec', value: 'share' }];
+  const ask = async (h, btns) => { while (true) { const v = await modal(h, btns); if (v === 'rage') await rageQuit(); else if (v === 'share') await shareCard(shareInfo); else return v; } };
   if (G.kind === 'btour') { btourAfterMatch(outcome); return; }
   if (online) {
     if (G.tour) {
@@ -279,7 +286,7 @@ async function endGame(r, opt = {}) {
       if (v === 'rep') { G = null; viewReplay(0, 'tour'); } else { G = null; tourView = 'online'; go('tour'); }
       return;
     }
-    const v = await ask(html + `<p class="muted small" id="remtxt"></p>`, [...rageBtn, { label: t('Menü'), cls: 'sec', value: 'menu' }, ...(hasReplay ? [{ label: '🎬', cls: 'sec', value: 'rep' }] : []), ...(G.oppLeft ? [] : [{ label: '🔁 ' + t('Rövanş'), value: 'rematch' }])]);
+    const v = await ask(html + `<p class="muted small" id="remtxt"></p>`, [...rageBtn, ...shareBtn, { label: t('Menü'), cls: 'sec', value: 'menu' }, ...(hasReplay ? [{ label: '🎬', cls: 'sec', value: 'rep' }] : []), ...(G.oppLeft ? [] : [{ label: '🔁 ' + t('Rövanş'), value: 'rematch' }])]);
     if (v === 'rematch' && G && !G.oppLeft) {
       netSend({ t: 'rematch' }); G.waitingRematch = true; setStatus('🔁 ' + t('Rövanş isteği gönderildi, rakip bekleniyor...'), 'info');
       const v2 = await modal(`<div class="spinner"></div><h3>${t('Rakip bekleniyor')}</h3>`, [{ label: t('Vazgeç'), cls: 'sec', value: 'menu' }]);
@@ -287,7 +294,7 @@ async function endGame(r, opt = {}) {
     } else { netSend({ t: 'leave' }); G = null; if (v === 'rep') viewReplay(0); else go('menu'); }
     return;
   }
-  const v = await ask(html, [...rageBtn, { label: t('Menü'), cls: 'sec', value: 'menu' }, ...(hasReplay ? [{ label: '🎬 ' + t('Tekrar İzle'), cls: 'sec', value: 'rep' }] : []), { label: t('Tekrar Oyna'), value: 'again' }]);
+  const v = await ask(html, [...rageBtn, ...shareBtn, { label: t('Menü'), cls: 'sec', value: 'menu' }, ...(hasReplay ? [{ label: '🎬 ' + t('Tekrar İzle'), cls: 'sec', value: 'rep' }] : []), { label: t('Tekrar Oyna'), value: 'again' }]);
   const kind = G.kind, bid = bot && bot.id; G = null;
   if (v === 'again') { if (kind === 'chat') Chat.start(); else startBot(bid, { mode }); } else if (v === 'rep') viewReplay(0); else go(v);
 }
@@ -380,23 +387,23 @@ RENDER.puzzles = () => {
         <div class="small">${puzzleGoal(p)}</div><div class="stars small">${'★'.repeat(Math.min(5, p.sol.length))}</div></button>`; }).join('')}</div>`;
 };
 const puzzleGoal = p => (PUZZLE_TEXT[p.type][LANG === 'en' ? 'en' : 'tr']).replace('{0}', p.target);
-function startPuzzle(i) {
-  const p = PUZZLES[i];
-  G = { kind: 'puzzle', mode: 'classic', st: Engine.newState('classic', 1, 0, p.board), puzzle: { idx: i, acc: { gain: 0, even: 0, empty: 0, extra: 0 }, seq: [] }, over: false, busy: false, scoreHist: [],
+function startPuzzle(i, custom) {
+  const p = custom || PUZZLES[i];
+  G = { kind: 'puzzle', mode: 'classic', st: Engine.newState('classic', 1, 0, p.board), puzzle: { idx: i, p, daily: !!custom, acc: { gain: 0, even: 0, empty: 0, extra: 0 }, seq: [] }, over: false, busy: false, scoreHist: [],
     opp: { name: '🧩 ' + t('Bulmaca'), avatar: { e: '🧩', bg: '#a5d8ff,#1864ab' }, frame: 'yok', hand: 'klasik', label: '' } };
   go('game'); setupGameUI();
-  $('g-puzzle').innerHTML = `<div><b>🧩 #${i + 1}</b> — ${puzzleGoal(p)}</div><span class="badge" id="pz-prog"></span>`;
+  $('g-puzzle').innerHTML = `<div><b>${custom ? '📅 ' + t('Günün Bulmacası') : '🧩 #' + (i + 1)}</b> — ${puzzleGoal(p)}</div><span class="badge" id="pz-prog"></span>`;
   updPuzzleProg(); setStatus(t('Rakip oynamaz. Hedefe tek turda ulaş!'), 'info'); gRender();
 }
 function updPuzzleProg() {
-  const p = PUZZLES[G.puzzle.idx], a = G.puzzle.acc, v = { even: a.even, empty: a.empty, gain: a.gain, chain: a.extra }[p.type];
+  const p = G.puzzle.p, a = G.puzzle.acc, v = { even: a.even, empty: a.empty, gain: a.gain, chain: a.extra }[p.type];
   $('pz-prog').textContent = `${Math.min(v, p.target)} / ${p.target}`;
   return v >= p.target;
 }
 async function puzzleAfter(out) {
   const a = G.puzzle.acc, r = out.r, st0b = null;
   G.puzzle.seq.push(out.act.pit);
-  a.gain = G.st.b[6] - PUZZLES[G.puzzle.idx].board[6];
+  a.gain = G.st.b[6] - G.puzzle.p.board[6];
   if (r.cap && r.cap.type === 'even') a.even += r.cap.amount;
   if (r.cap && r.cap.type === 'empty') a.empty += r.cap.amount;
   if (r.extra) a.extra++;
@@ -405,12 +412,13 @@ async function puzzleAfter(out) {
   if (G.st.over || G.st.turn !== 0) {
     G.busy = false; G.over = true; gRender(); Sound.sfx.defeat();
     const v = await modal(`<div class="big">🤔</div><h3>${t('Olmadı!')}</h3><p class="muted">${t('Turun bitti ama hedefe ulaşamadın. Tekrar dene!')}</p>`, [{ label: t('Çık'), cls: 'sec', value: 0 }, { label: '💡 ' + t('İpucu'), cls: 'sec', value: 2 }, { label: '🔄 ' + t('Tekrar'), value: 1 }]);
-    const idx = G.puzzle.idx; if (v === 0) { G = null; go('puzzles'); } else { startPuzzle(idx); if (v === 2) puzzleHint(); }
+    const pz = G.puzzle; if (v === 0) { G = null; go('puzzles'); } else { startPuzzle(pz.idx, pz.daily ? pz.p : null); if (v === 2) puzzleHint(); }
     return;
   }
   setStatus('⭐ ' + t('Tekrar senin sıran! Devam et.'), 'info'); G.busy = false; gRender();
 }
 async function puzzleSolved() {
+  if (G.puzzle.daily) return dailySolved();
   const i = G.puzzle.idx, first = !S.puzzles[i];
   G.over = true; G.busy = false; gRender();
   S.puzzles[i] = 1; track('puzzle');
@@ -424,7 +432,7 @@ async function puzzleSolved() {
 }
 function puzzleHint() {
   if (!G || G.kind !== 'puzzle') return;
-  const p = PUZZLES[G.puzzle.idx], seq = G.puzzle.seq;
+  const p = G.puzzle.p, seq = G.puzzle.seq;
   const onTrack = seq.every((m, k) => p.sol[k] === m);
   if (!onTrack) { toast('💡 ' + t('Bu yol çözüme gitmiyor. Sıfırla ve tekrar dene.')); return; }
   G.hint = p.sol[seq.length]; gRender(); toast('💡 ' + t('Parlayan kuyuyu dene!'));
@@ -643,7 +651,7 @@ async function netHandle(m) {
       break; }
     case 'queued': NET.lobby = 'queue'; NET.qmode = m.mode; RENDER.online(); break;
     case 'cancelled': NET.lobby = 'idle'; if (curScreen === 'online') RENDER.online(); break;
-    case 'room': NET.lobby = 'room'; NET.code = m.code; privMode = m.mode || privMode; if (NET.invite) { NET.invite = false; copyLink(); } RENDER.online(); break;
+    case 'room': NET.lobby = 'room'; NET.code = m.code; privMode = m.mode || privMode; if (NET.invite) { NET.invite = false; copyLink(); } if (NET.inviteTo) { netSend({ t: 'invite', to: NET.inviteTo }); toast('📨 ' + t('{0} maça davet edildi!', esc(NET.inviteTo))); NET.inviteTo = null; } RENDER.online(); break;
     case 'oppDc': toast('📡 ' + t('Rakibin bağlantısı koptu, {0} sn bekleniyor...', m.secs), 4000); setStatus('📡 ' + t('Rakibin bağlantısı koptu, {0} sn bekleniyor...', m.secs), 'info'); break;
     case 'oppBack': toast('✅ ' + t('Rakibin maça geri döndü!')); setStatus(G && G.st.turn === 0 ? t('Senin sıran. Bir kuyu seç.') : '', 'good'); break;
     case 'resumeFail': lsDel('mangala_resume'); if (G && G.kind === 'online' && G.dc) { G.over = true; setTimer(null, null); modal(`<div class="big">📡</div><h3>${t('Maça geri dönülemedi')}</h3><p class="muted">${t('Bağlantı çok uzun süre koptu.')}</p>`, [{ label: t('Menü'), value: 1 }]).then(() => { G = null; go('menu'); }); } break;
@@ -677,6 +685,9 @@ async function netHandle(m) {
     case 'warn': Sound.sfx.error(); vib([80, 60, 80]);
       modal(`<div class="big">⚠️</div><h3>${t('Yönetimden uyarı')}</h3><p>${esc(m.msg)}</p><p class="muted small">— ${esc(m.by || '')}</p>`, [{ label: t('Anladım'), value: 1 }]); break;
     case 'content': setContent(m.content); break;
+    case 'invited': onInvited(m); break;
+    case 'friendReq': FR.list = null; loadFriends(); Sound.sfx.pop(); toast('📨 ' + t('{0} sana arkadaşlık isteği gönderdi! (Çevrimiçi → Arkadaşlar)', esc(m.from)), 5000); break;
+    case 'friendUpdate': FR.list = null; loadFriends(); toast('🤝 ' + t('{0} ile artık arkadaşsınız!', esc(m.msg))); break;
     case 'kicked': NET.manual = true; closeModal(); G = null;
       await modal(`<div class="big">⛔</div><h3>${esc(t(m.msg))}</h3>`, [{ label: t('Tamam'), value: 1 }]);
       if (/yasak|banned|silindi|deleted/i.test(m.msg)) logout(); else go('menu'); break;
@@ -738,7 +749,7 @@ RENDER.online = () => {
   const el = $('scr-online');
   const st = { connecting: ['wait', t('Sunucuya bağlanılıyor...')], waking: ['wait', t('Sunucu uyanıyor... (ücretsiz sunucu ilk açılışta ~1 dakika sürebilir)')], ok: ['ok', t('Bağlı')],
     error: ['bad', t('Sunucuya bağlanılamadı')], lost: ['bad', t('Bağlantı koptu')], nourl: ['bad', t('Sunucu adresi yok')], off: ['wait', '...'] }[NET.state] || ['bad', ''];
-  const tabs = [['play', '⚔️ ' + t('Oyna')], ['tour', '🏆 ' + t('Turnuva')], ['watch', '👁️ ' + t('İzle')], ['top', '📊 ' + t('Liderlik')]];
+  const tabs = [['play', '⚔️ ' + t('Oyna')], ['friends', '👥 ' + t('Arkadaşlar') + (FR.req.length ? ' (' + FR.req.length + ')' : '')], ['tour', '🏆 ' + t('Turnuva')], ['watch', '👁️ ' + t('İzle')], ['top', '📊 ' + t('Liderlik')]];
   let h = `<button class="btn sec sm back" onclick="netLeaveLobby()">← ${t('Geri')}</button><h2>🌍 ${t('Çevrimiçi')}</h2>
     <div class="card row between" style="margin-bottom:12px"><div class="net-status ${st[0]}"><span class="led"></span>${st[1]}</div>${NET.state === 'ok' ? `<span class="muted">🟢 <b id="oncount">${NET.online}</b> ${t('oyuncu çevrimiçi')}</span>` : ''}
       ${AUTH.user ? `<span>${leagueBadge(AUTH.user.elo)} <b>${AUTH.user.elo}</b> Elo</span>` : `<span class="muted small">${t('Misafir: dereceli ve turnuva kapalı')}</span>`}</div>
@@ -766,6 +777,8 @@ RENDER.online = () => {
   } else if (onlineTab === 'watch') {
     h += `<div class="row" style="margin-bottom:10px"><button class="btn sec sm" onclick="netSend({t:'lives'})">🔄 ${t('Yenile')}</button><input class="codein" id="codein" maxlength="4" placeholder="${t('KOD')}"><button class="btn sm" onclick="spectateCode()">👁️ ${t('Kodla izle')}</button></div>
       <div class="list">${(NET.lives || []).map(r => `<div class="lrow"><div class="grow"><b>${esc(r.names[0])} ${r.scores[0]} – ${r.scores[1]} ${esc(r.names[1])}</b><span class="muted small">${MODES[r.mode].icon} ${nm(MODES[r.mode])}${r.qmode === 'ranked' ? ' · 🏅' : ''}${r.tour ? ' · 🏆' : ''}${r.specs ? ' · 👁️ ' + r.specs : ''}</span></div><button class="btn xs" onclick="spectate('${r.code}')">${t('İzle')}</button></div>`).join('') || `<p class="muted">${t('Şu an canlı maç yok.')}</p>`}</div>`;
+  } else if (onlineTab === 'friends') {
+    h += friendsHTML();
   } else if (onlineTab === 'top') {
     h += `<div class="list">${(NET.lb || []).map((u, i) => `<button class="lrow" style="width:100%;text-align:left" onclick="viewProfile('${esc(u.name)}')"><span class="rk">${i < 3 ? ['🥇', '🥈', '🥉'][i] : i + 1}</span>${avatarHTML(u.avatar || 'gulen', 'yok', 34)}<div class="grow"><b>${esc(u.name)} ${u.rank ? rankBadge(u.rank) : ''}</b><span class="muted small">${u.w}G ${u.d}B ${u.l}M</span></div>${leagueBadge(u.elo)}<b>${u.elo}</b></button>`).join('') || `<p class="muted">${NET.lb ? t('Henüz dereceli maç oynanmadı.') : '...'}</p>`}</div>
       <div class="card" style="margin-top:12px"><b>${t('Ligler')}</b><div class="row" style="margin-top:8px">${LEAGUES.map(l => `<span class="lg" style="color:${l.color}">${l.icon} ${nm(l)} ${l.min}+</span>`).join('')}</div></div>`;
@@ -774,7 +787,7 @@ RENDER.online = () => {
 };
 function setPrivMode(k) { privMode = k; RENDER.online(); }
 let PENDING_ROOM = (() => { try { const c = new URLSearchParams(location.search).get('room'); if (c && /^[A-Za-z0-9]{4}$/.test(c)) { history.replaceState(null, '', location.pathname); return c.toUpperCase(); } } catch { } return null; })();
-const roomLink = () => `${location.origin}${location.pathname}?room=${NET.code}`;
+const roomLink = () => { const base = CONTENT.inviteUrl || (location.origin + location.pathname); return base + (base.includes('?') ? '&' : '?') + 'room=' + NET.code; };
 async function copyLink() {
   const l = roomLink();
   try { await navigator.clipboard.writeText(l); toast('📋 ' + t('Link kopyalandı! WhatsApp\'a yapıştır ve gönder.'), 3500); Sound.sfx.coin(); }

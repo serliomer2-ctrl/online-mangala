@@ -19,8 +19,8 @@ const lsDel = k => { try { localStorage.removeItem(k); } catch { } };
    KAYIT / HESAP
    ========================================================= */
 const DEF = { coins: 0, tutorialDone: false, tutStep: 0,
-  own: { boards: ['klasik'], stones: ['renkli'], hands: ['klasik'], avatars: ['gulen'], frames: ['yok'], emojis: ['temel'], msgs: ['temel'] },
-  eq: { board: 'klasik', stone: 'renkli', hand: 'klasik', avatar: 'gulen', frame: 'yok' },
+  own: { boards: ['klasik'], stones: ['renkli'], hands: ['klasik'], avatars: ['gulen'], frames: ['yok'], emojis: ['temel'], msgs: ['temel'], bgs: ['yok'], wins: ['klasik'] },
+  eq: { board: 'klasik', stone: 'renkli', hand: 'klasik', avatar: 'gulen', frame: 'yok', bg: 'yok', win: 'klasik' }, hist: [], dpz: { last: '', streak: 0, count: 0 }, preview: true, musicTheme: 'lofi', gfx: 'high', pitUse: [0, 0, 0, 0, 0, 0], wheel: { day: '', spins: 0 },
   bots: ['kolay'], camera: false, chatMode: false, chatChannel: '', chatVoteSec: 15, rages: 0, speed: 'normal', handAnim: true, music: true, musicVol: 0.4, sfxVol: 0.8, haptics: true, layout: 'auto',
   name: '', xp: 0, stats: {}, totals: { games: 0, wins: 0, draws: 0, online: 0, onlineWins: 0, even: 0, empty: 0, extra: 0, best: 0, tourWins: 0 },
   pass: { season: '', xp: 0, premium: false, free: [], prem: [] }, daily: { day: '', prog: {}, claimed: [] }, login: { last: '', streak: 0 },
@@ -30,8 +30,12 @@ function normalize(raw) {
   const s = Object.assign(JSON.parse(JSON.stringify(DEF)), raw);
   for (const k of ['own', 'eq', 'totals', 'pass', 'daily', 'login', 'event']) s[k] = Object.assign(JSON.parse(JSON.stringify(DEF[k])), raw[k] || {});
   for (const c in DEF.own) if (!Array.isArray(s.own[c])) s.own[c] = DEF.own[c].slice();
-  for (const c in s.eq) { const cat = { board: 'boards', stone: 'stones', hand: 'hands', avatar: 'avatars', frame: 'frames' }[c]; if (!CAT[cat][s.eq[c]]) s.eq[c] = DEF.eq[c]; }
+  for (const c in s.eq) { const cat = { board: 'boards', stone: 'stones', hand: 'hands', avatar: 'avatars', frame: 'frames', bg: 'bgs', win: 'wins' }[c]; if (!cat || !CAT[cat][s.eq[c]]) s.eq[c] = DEF.eq[c]; }
   if (!Array.isArray(s.replays)) s.replays = [];
+  if (!Array.isArray(s.hist)) s.hist = [];
+  if (!Array.isArray(s.pitUse) || s.pitUse.length !== 6) s.pitUse = [0, 0, 0, 0, 0, 0];
+  if (!s.wheel || typeof s.wheel !== 'object') s.wheel = { day: '', spins: 0 };
+  if (!s.dpz || typeof s.dpz !== 'object') s.dpz = { last: '', streak: 0, count: 0 };
   if (!s.name) s.name = (LANG === 'en' ? 'Player' : 'Oyuncu') + Math.floor(1000 + Math.random() * 9000);
   return s;
 }
@@ -45,7 +49,8 @@ const rankBadge = r => r ? `<span class="rk-b" style="color:${r.color};border-co
 /* ---------- kurucunun yönettiği içerik (ranklar, etkinlikler, arayüz) ---------- */
 let CONTENT = lsGet('mangala_content', null) || { ranks: [], events: [], ui: null };
 function setContent(c) {
-  if (!c) return; CONTENT = c; lsSet('mangala_content', c); applyAccent();
+  if (!c) return;
+  if (c.inviteUrl == null && CONTENT.inviteUrl) c.inviteUrl = CONTENT.inviteUrl; CONTENT = c; lsSet('mangala_content', c); applyAccent();
   if (typeof S !== 'undefined' && S.event) ensurePeriods();
   if (['menu', 'events', 'shop'].includes(curScreen)) go(curScreen);
 }
@@ -577,29 +582,84 @@ async function animateCard(el, st0, p, card, arg, st1, base = {}) {
 }
 
 /* ---------- konfeti + arka plan parçacıkları ---------- */
-function confetti() {
-  const c = $('confetti'), x = c.getContext('2d'), dpr = Math.min(3, devicePixelRatio || 1);
-  c.width = innerWidth * dpr; c.height = innerHeight * dpr; c.style.width = innerWidth + 'px'; c.style.height = innerHeight + 'px'; x.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const cols = ['#f2c14e', '#e5534b', '#4cc38a', '#5aa9e6', '#a77bf3', '#fff'];
-  const P = Array.from({ length: 160 }, () => ({ x: innerWidth / 2 + (Math.random() - .5) * 200, y: innerHeight * .35, vx: (Math.random() - .5) * 14, vy: -Math.random() * 14 - 4,
-    r: 4 + Math.random() * 5, c: cols[Math.floor(Math.random() * cols.length)], a: Math.random() * 6, va: (Math.random() - .5) * .3 }));
-  const T0 = performance.now();
-  (function step() { x.clearRect(0, 0, c.width, c.height); const f = (performance.now() - T0) / 16.7;
-    for (const p of P) { p.vy += .35; p.vx *= .99; p.x += p.vx; p.y += p.vy; p.a += p.va;
-      x.save(); x.translate(p.x, p.y); x.rotate(p.a); x.fillStyle = p.c; x.fillRect(-p.r, -p.r / 2, p.r * 2, p.r); x.restore(); }
-    if (f < 180) requestAnimationFrame(step); else x.clearRect(0, 0, c.width, c.height); })();
-  setTimeout(() => x.clearRect(0, 0, c.width, c.height), 3500);
+/* ---------- zafer efektleri (konfeti, havai fişek, altın, kalp, yıldız, ejderha) ---------- */
+let confettiRun = 0;
+function confetti(mode) {
+  mode = mode || (S.eq && S.eq.win) || 'klasik'; if (!CAT.wins[mode]) mode = 'klasik';
+  const c = $('confetti'), x = c.getContext('2d'), dpr = Math.min(3, devicePixelRatio || 1), W = innerWidth, H = innerHeight, run = ++confettiRun;
+  c.width = W * dpr; c.height = H * dpr; c.style.width = W + 'px'; c.style.height = H + 'px'; x.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const cols = ['#f2c14e', '#e5534b', '#4cc38a', '#5aa9e6', '#a77bf3', '#fff'], R = (a, b) => a + Math.random() * (b - a), pk = a => a[Math.floor(Math.random() * a.length)];
+  const P = [];
+  const add = o => P.push(Object.assign({ x: W / 2, y: H * .35, vx: 0, vy: 0, g: .35, drag: .99, dragY: 1, r: 5, a: Math.random() * 6, va: (Math.random() - .5) * .3, life: 1e9, age: 0, delay: 0 }, o));
+  if (mode === 'altin') for (let i = 0; i < 80; i++) add({ x: R(0, W), y: R(-H * .7, -20), vx: R(-1, 1), vy: R(2, 5), g: .12, e: Math.random() < .75 ? '🪙' : '💰', r: R(16, 30) });
+  else if (mode === 'kalp') for (let i = 0; i < 70; i++) add({ x: R(W * .15, W * .85), y: H + 30, vx: R(-2.2, 2.2), vy: R(-15, -8), g: .13, e: pk(['💖', '❤️', '💕', '💗', '💘']), r: R(16, 32), a: 0, va: R(-.03, .03), delay: Math.floor(R(0, 40)) });
+  else if (mode === 'yildiz') for (let i = 0; i < 100; i++) { const an = R(0, 6.283), sp = R(3, 14); add({ vx: Math.cos(an) * sp, vy: Math.sin(an) * sp, g: .06, drag: .97, dragY: .97, e: pk(['⭐', '🌟', '✨', '💫']), r: R(12, 28), delay: Math.floor(R(0, 12)) }); }
+  else if (mode === 'havai') {
+    for (let k = 0; k < 7; k++) {
+      const cx = R(W * .15, W * .85), cy = R(H * .12, H * .45), col = pk(cols), d = k * 20 + Math.floor(R(0, 8));
+      add({ x: cx, y: H + 10, vx: 0, vy: -(H + 10 - cy) / 26, g: 0, drag: 1, c: '#ffe8a0', r: 2.4, dot: 1, life: 26, delay: d });
+      for (let i = 0; i < 48; i++) { const an = i / 48 * 6.283, sp = R(2, 6.5); add({ x: cx, y: cy, vx: Math.cos(an) * sp, vy: Math.sin(an) * sp, g: .07, drag: .975, dragY: .975, c: Math.random() < .2 ? '#fff' : col, r: R(1.6, 3.2), dot: 1, life: R(70, 100), delay: d + 26 }); }
+      setTimeout(() => run === confettiRun && Sound.sfx.pop(), (d + 26) * 16.7);
+    }
+  } else if (mode === 'ejder') {
+    add({ x: -130, y: H * .38, vx: (W + 260) / 120, vy: 0, g: 0, drag: 1, e: '🐉', r: 120, a: 0, va: 0, flip: 1, trail: 1, wave: 1 });
+    setTimeout(() => run === confettiRun && Sound.sfx.boom && Sound.sfx.boom(), 300);
+  } else for (let i = 0; i < 160; i++) add({ x: W / 2 + (Math.random() - .5) * 200, vx: (Math.random() - .5) * 14, vy: -Math.random() * 14 - 4, r: 4 + Math.random() * 5, c: pk(cols) });
+  let f = 0;
+  (function step() {
+    if (run !== confettiRun) return;
+    x.clearRect(0, 0, W, H); f++;
+    for (let k = 0; k < P.length; k++) { const p = P[k];
+      if (p.delay > 0) { p.delay--; continue; }
+      if (++p.age > p.life) continue;
+      p.vy += p.g; p.vx *= p.drag; p.vy *= p.dragY; p.x += p.vx; p.y += p.vy; p.a += p.va;
+      if (p.wave) p.y = H * .38 + Math.sin(p.age / 9) * 28;
+      if (p.trail && p.age % 2 === 0 && p.x > -60 && p.x < W + 60) add({ x: p.x + 40, y: p.y + 18, vx: R(1, 4), vy: R(-1.5, 1.5), g: -.04, drag: .96, e: pk(['🔥', '🔥', '✨']), r: R(16, 30), life: 45, a: 0, va: 0 });
+      x.save(); x.globalAlpha = Math.max(0, Math.min(1, (p.life - p.age) / 20)); x.translate(p.x, p.y); x.rotate(p.a);
+      if (p.e) { if (p.flip) x.scale(-1, 1); x.font = `${p.r}px serif`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(p.e, 0, 0); }
+      else if (p.dot) { x.fillStyle = p.c; x.beginPath(); x.arc(0, 0, p.r, 0, 7); x.fill(); }
+      else { x.fillStyle = p.c; x.fillRect(-p.r, -p.r / 2, p.r * 2, p.r); }
+      x.restore(); }
+    if (f < 210) requestAnimationFrame(step); else x.clearRect(0, 0, W, H);
+  })();
+  setTimeout(() => run === confettiRun && x.clearRect(0, 0, W, H), 4200);
 }
+
+/* ---------- canlı arka planlar (mağazadan) ---------- */
+const BGFX = {
+  yok: { move(p) { p.y -= p.v; p.x += Math.sin(p.y / 60) * .2; }, draw(x, p) { x.fillStyle = `rgba(255,210,140,${p.a})`; x.beginPath(); x.arc(p.x, p.y, p.r, 0, 7); x.fill(); } },
+  kar: { move(p) { p.y += p.v * 5 + .5; p.x += Math.sin(p.ph += .02) * .6; }, draw(x, p) { x.fillStyle = `rgba(255,255,255,${p.a + .35})`; x.beginPath(); x.arc(p.x, p.y, p.r * 1.5, 0, 7); x.fill(); } },
+  yaprak: { move(p) { p.y += p.v * 4 + .4; p.x += Math.sin(p.ph += .015) * 1.1 + .2; p.rot += .02; }, draw(x, p) { emo(x, p, p.r > 1.6 ? '🍁' : '🍂', 12 + p.r * 5, .75); } },
+  kiraz: { move(p) { p.y += p.v * 3 + .3; p.x += Math.sin(p.ph += .02) * .9 + .45; p.rot += .015; }, draw(x, p) { emo(x, p, '🌸', 9 + p.r * 4, .8); } },
+  atesbocegi: { move(p) { p.ph += .02; p.x += Math.cos(p.ph * 1.1 + p.r) * .5; p.y += Math.sin(p.ph * 1.3) * .35; },
+    draw(x, p) { const al = Math.max(0, Math.sin(p.ph * 2 + p.r * 3)) * .9, rr = p.r * 5; const g = x.createRadialGradient(p.x, p.y, 0, p.x, p.y, rr); g.addColorStop(0, `rgba(230,255,120,${al})`); g.addColorStop(1, 'rgba(230,255,120,0)'); x.fillStyle = g; x.beginPath(); x.arc(p.x, p.y, rr, 0, 7); x.fill(); } },
+  yildiz: { move(p, W, H) { p.ph += .04; if (p.shoot) { p.x += 9; p.y += 4; if (p.x > W + 40) p.shoot = 0; } else if (Math.random() < .0004) { p.shoot = 1; p.sx = p.x; p.sy = p.y; } },
+    draw(x, p) { if (p.shoot) { const g = x.createLinearGradient(p.x - 90, p.y - 40, p.x, p.y); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(255,255,255,.9)'); x.strokeStyle = g; x.lineWidth = 2; x.beginPath(); x.moveTo(p.x - 90, p.y - 40); x.lineTo(p.x, p.y); x.stroke(); return; }
+      const al = (p.a + .3) * (.45 + .55 * Math.sin(p.ph + p.r * 4)), s = p.r * 1.8; x.strokeStyle = x.fillStyle = `rgba(255,244,200,${Math.max(0, al)})`; x.lineWidth = 1; x.beginPath(); x.moveTo(p.x - s * 2, p.y); x.lineTo(p.x + s * 2, p.y); x.moveTo(p.x, p.y - s * 2); x.lineTo(p.x, p.y + s * 2); x.stroke(); x.beginPath(); x.arc(p.x, p.y, s * .55, 0, 7); x.fill(); } },
+  deniz: { move(p) { p.y -= p.v * 5 + .4; p.x += Math.sin(p.ph += .05) * .5; }, draw(x, p) { x.strokeStyle = `rgba(170,225,255,${p.a + .3})`; x.lineWidth = 1.2; x.beginPath(); x.arc(p.x, p.y, p.r * 3, 0, 7); x.stroke(); x.fillStyle = 'rgba(255,255,255,.5)'; x.beginPath(); x.arc(p.x - p.r, p.y - p.r, p.r * .6, 0, 7); x.fill(); } },
+  hazine: { move(p) { p.y += p.v * 4 + .6; p.rot += .05; }, draw(x, p) { x.save(); x.translate(p.x, p.y); x.scale(Math.cos(p.rot), 1); x.globalAlpha = .7; x.font = `${12 + p.r * 5}px serif`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('🪙', 0, 0); x.restore(); } }
+};
+function emo(x, p, e, size, al) { x.save(); x.translate(p.x, p.y); x.rotate(p.rot); x.globalAlpha = al; x.font = `${size}px serif`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(e, 0, 0); x.restore(); }
+let bgTry = null, bgTryT = 0;
+function tryBg(id) { bgTry = id; clearTimeout(bgTryT); bgTryT = setTimeout(() => { bgTry = null; }, 6000); Sound.sfx.click(); toast('👀 ' + t('6 saniyelik önizleme')); }
 (function dust() {
-  const c = $('fx'), x = c.getContext('2d'); let P = [];
-  const resize = () => { const dpr = Math.min(3, devicePixelRatio || 1), W = innerWidth, H = innerHeight;
+  const c = $('fx'), x = c.getContext('2d'); let P = [], W = 0, H = 0;
+  const mk = () => ({ x: Math.random() * W, y: Math.random() * H, r: Math.random() * 2 + .5, v: Math.random() * .25 + .05, a: Math.random() * .4 + .1, ph: Math.random() * 7, rot: Math.random() * 7 });
+  const resize = () => { const dpr = Math.min(3, devicePixelRatio || 1); W = innerWidth; H = innerHeight;
     c.width = W * dpr; c.height = H * dpr; c.style.width = W + 'px'; c.style.height = H + 'px'; x.setTransform(dpr, 0, 0, dpr, 0, 0);
-    P = Array.from({ length: Math.min(40, Math.round(W / 30)) }, () => ({ x: Math.random() * W, y: Math.random() * H, r: Math.random() * 2 + .5, v: Math.random() * .25 + .05, a: Math.random() * .4 + .1 })); };
+    P = Array.from({ length: Math.min(40, Math.round(W / 30)) }, mk); };
   resize(); addEventListener('resize', resize);
-  (function loop() { if (!document.hidden && !matchMedia('(prefers-reduced-motion: reduce)').matches) { x.clearRect(0, 0, innerWidth, innerHeight);
-    for (const p of P) { p.y -= p.v; p.x += Math.sin(p.y / 60) * .2; if (p.y < -5) { p.y = innerHeight + 5; p.x = Math.random() * innerWidth; }
-      x.fillStyle = `rgba(255,210,140,${p.a})`; x.beginPath(); x.arc(p.x, p.y, p.r, 0, 7); x.fill(); } }
-    setTimeout(() => requestAnimationFrame(loop), 50); })();
+  (function loop() {
+    if (S.gfx === 'low') x.clearRect(0, 0, W, H);
+    else if (!document.hidden && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const fx = BGFX[bgTry || (S.eq && S.eq.bg)] || BGFX.yok; x.clearRect(0, 0, W, H);
+      for (const p of P) { fx.move(p, W, H);
+        if (p.y < -30) { p.y = H + 20; p.x = Math.random() * W; } else if (p.y > H + 30) { p.y = -20; p.x = Math.random() * W; }
+        if (p.x < -30) p.x = W + 20; else if (p.x > W + 30 && !p.shoot) p.x = -20;
+        fx.draw(x, p); }
+    }
+    setTimeout(() => requestAnimationFrame(loop), 33);
+  })();
 })();
 
 /* =========================================================
@@ -609,12 +669,12 @@ let curScreen = 'auth';
 const RENDER = {};
 function go(name) {
   if (name !== 'auth' && !AUTH.guest && !AUTH.token) name = 'auth';
-  if (name !== 'auth' && !S.tutorialDone && !(name === 'game' && G && (G.kind === 'online' || G.kind === 'spectate'))) name = 'tutorial';
+  if (name !== 'auth' && !S.tutorialDone && !(name === 'game' && G && (G.kind === 'online' || G.kind === 'spectate'))) name = S.rulesAsked || S.tutStep > 0 ? 'tutorial' : 'welcome';
   if (curScreen === 'game' && name !== 'game' && G && !G.over && G.kind !== 'spectate' && G.kind !== 'puzzle') { leaveGameConfirm(name); return; }
   if (curScreen === 'game' && name !== 'game' && G && G.kind === 'spectate') netSend({ t: 'unspec' });
   ensurePeriods();
   curScreen = name; closePanel();
-  document.body.classList.toggle('ingame', name === 'game' || name === 'tutorial');
+  document.body.classList.toggle('ingame', ['game', 'tutorial', 'welcome', 'guide'].includes(name));
   document.body.classList.toggle('authscr', name === 'auth');
   document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === 'scr-' + name));
   calcLayout();
@@ -656,7 +716,7 @@ $('pchip').onclick = () => go('profile');
 $('dailybtn').onclick = () => openDaily();
 $('musicbtn').onclick = () => { S.music = !S.music; persist(); applySettings(); updTop(); };
 document.addEventListener('pointerdown', () => { Sound.unlock(); if (S.music && !Sound.musicPlaying && curScreen !== 'auth') Sound.music(true); }, { passive: true });
-function applySettings() { Sound.setSfx(S.sfxVol); Sound.setMusicVol(S.musicVol); if (curScreen !== 'auth') Sound.music(!!S.music); }
+function applySettings() { Sound.theme(S.musicTheme || 'lofi'); if (typeof applyGfx === 'function') applyGfx(); Sound.setSfx(S.sfxVol); Sound.setMusicVol(S.musicVol); if (curScreen !== 'auth') Sound.music(!!S.music); }
 let rsT; addEventListener('resize', () => { clearTimeout(rsT); rsT = setTimeout(() => { const old = LAYOUT; calcLayout(); if (old !== LAYOUT) refreshBoards(); }, 200); });
 function refreshBoards() { if (curScreen === 'tutorial') tutRender(); else if (curScreen === 'game' && G) gRender(); else if (curScreen === 'menu') RENDER.menu(); else if (curScreen === 'replay') repRender(); }
 
@@ -685,6 +745,7 @@ RENDER.menu = () => {
       ${can('panel') ? `<button class="mcard admin" onclick="go('admin')"><div class="ic">${AUTH.user.rank ? AUTH.user.rank.icon : '🛡️'}</div><h3>${t('Yönetim Paneli')}</h3><p>${esc(nm(AUTH.user.rank))} · ${t('yetkilerine göre')}</p></button>` : ''}
     </div>`;
   renderBoard($('mboard'), INIT, { labels: false, layout: 'h' });
+  setTimeout(maybeOfferGuide, 900);
 };
 /* ---------- kurucunun hazır bileşenleri ---------- */
 function uiBlocksHTML(blocks) { return blocks && blocks.length ? `<div class="ublocks">${blocks.map(uiBlockHTML).join('')}</div>` : ''; }
@@ -713,7 +774,7 @@ async function openDaily() {
 /* ---------- Mağaza ---------- */
 let shopCur = 'featured';
 function dailyDeals() {
-  const pool = []; for (const c of ['boards', 'stones', 'hands', 'avatars', 'frames', 'emojis', 'msgs']) for (const [id, it] of Object.entries(CAT[c])) if (it.price > 0 && !it.src) pool.push([c, id]);
+  const pool = []; for (const c of ['boards', 'stones', 'hands', 'avatars', 'frames', 'emojis', 'msgs', 'bgs', 'wins']) for (const [id, it] of Object.entries(CAT[c])) if (it.price > 0 && !it.src) pool.push([c, id]);
   return shuffled(pool, 'deal' + dayKey()).slice(0, 3).map(([c, id], k) => ({ c, id, off: [30, 40, 50][k] }));
 }
 const evShop = (c, id) => (curEvent().shop || []).find(x => x[0] === c && x[1] === id);
@@ -727,6 +788,8 @@ function previewHTML(c, id) {
   if (c === 'avatars') return `<div class="prev">${avatarHTML(id, S.eq.frame, 76)}</div>`;
   if (c === 'frames') return `<div class="prev">${avatarHTML(S.eq.avatar, id, 76)}</div>`;
   if (c === 'emojis') return `<div class="prev a-${it.anim}" style="font-size:26px;letter-spacing:2px;padding:6px">${it.list.map(e => `<span class="em">${e}</span>`).join('')}</div>`;
+  if (c === 'bgs') return `<div class="prev bgprev bg-${id}" onclick="tryBg('${id}')" title="${esc(t('Önizlemek için tıkla'))}">${[0, 1, 2, 3, 4].map(k => `<span style="--k:${k}">${it.icon}</span>`).join('')}<small>👀 ${t('Dene')}</small></div>`;
+  if (c === 'wins') return `<div class="prev fxprev" onclick="confetti('${id}')" title="${esc(t('Önizlemek için tıkla'))}"><span class="fxic">${it.icon}</span><small>▶ ${t('Dene')}</small></div>`;
   if (c === 'msgs') return `<div class="prev" style="font-size:12px;padding:8px;gap:4px;display:flex;flex-direction:column;align-items:flex-start">${msgList(it).slice(0, 3).map(m => `<span style="background:#fff;color:#2a1a10;border-radius:10px;padding:2px 8px;font-weight:700">${esc(m)}</span>`).join('')}</div>`;
 }
 const msgList = it => LANG === 'en' && it.len ? it.len : it.list;
@@ -876,7 +939,7 @@ function saveName() { const v = $('pname').value.replace(/[<>&"'`]/g, '').trim()
 const stat = id => S.stats[id] || (S.stats[id] = { w: 0, l: 0, d: 0 });
 
 /* ---------- Kurallar & Ayarlar ---------- */
-RENDER.rules = () => { $('scr-rules').innerHTML = `<button class="btn sec sm back" onclick="go('menu')">← ${t('Menü')}</button><h2>📜 ${t('Mangala Kuralları')}</h2><div class="panel">${RULES[LANG === 'en' ? 'en' : 'tr']}</div>`; };
+RENDER.rules = () => { $('scr-rules').innerHTML = `<button class="btn sec sm back" onclick="go('menu')">← ${t('Menü')}</button><h2>📜 ${t('Mangala Kuralları')}</h2><div class="row" style="margin-bottom:12px"><button class="btn purple" onclick="openGuide()">📖 ${t('Oyun Rehberi')}</button></div><div class="panel">${RULES[LANG === 'en' ? 'en' : 'tr']}</div>`; };
 let installPrompt = null;
 addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; if (curScreen === 'settings') RENDER.settings(); });
 RENDER.settings = () => {
@@ -888,9 +951,11 @@ RENDER.settings = () => {
     <div class="set-row"><span>🌐 ${t('Dil')}</span><div class="langsel" style="margin:0">${langButtons()}</div></div>
     <div class="set-row"><span>🎵 ${t('Arka plan müziği')}</span>${sw(S.music, 'S.music=!S.music')}</div>
     <div class="set-row"><span>🎚️ ${t('Müzik sesi')}</span><input type="range" min="0" max="1" step="0.05" value="${S.musicVol}" oninput="S.musicVol=+this.value;applySettings()" onchange="persist()"></div>
+    ${typeof settingsExtra === 'function' ? settingsExtra() : ''}
     <div class="set-row"><span>🔊 ${t('Efekt sesi')}</span><input type="range" min="0" max="1" step="0.05" value="${S.sfxVol}" oninput="S.sfxVol=+this.value;applySettings()" onchange="persist();Sound.sfx.clack()"></div>
     <div class="set-row"><span>📳 ${t('Titreşim (mobil)')}</span>${sw(S.haptics, 'S.haptics=!S.haptics')}</div>
     <div class="set-row"><span>✋ ${t('El animasyonu')}</span>${sw(S.handAnim, 'S.handAnim=!S.handAnim')}</div>
+    <div class="set-row"><span>👀 ${t('Hamle önizleme (fareyle kuyunun üstüne gel)')}</span>${sw(S.preview, 'S.preview=!S.preview')}</div>
     <div class="set-row"><div><div>📷 ${t('Kamera ile el kontrolü (deneysel)')}</div><div class="muted small">${t('Elini kameraya göster: yumruk yap = taşları al, elini aç = kuyuya bırak. Menülerde de aynı hareketle tıklarsın. Görüntü cihazından çıkmaz.')}</div></div>
       <button class="switch ${S.camera ? 'on' : ''}" onclick="S.camera=!S.camera;persist();S.camera?Cam.start():Cam.stop();RENDER.settings()"></button></div>
     <div class="set-row"><div><div>📺 ${t('Yayın Modu: Twitch Chat Plays')}</div><div class="muted small">${t('Rakibin yayın sohbetin olur; izleyiciler !kuyu 1-6 yazarak oy verir. Menü → Oyna → Chat\'e Karşı.')}</div></div>
@@ -901,7 +966,7 @@ RENDER.settings = () => {
     <div class="set-row"><span>⏩ ${t('Taş dağıtma hızı')}</span><div class="row">${sp('slow')}${sp('normal')}${sp('fast')}</div></div>
     <div class="set-row"><span>📱 ${t('Tahta düzeni')}</span><div class="row">${ly('auto')}${ly('h')}${ly('v')}</div></div>
     <div class="set-row"><div><div>📲 ${t('Uygulama olarak yükle')}</div><div class="muted small">${standalone ? t('Zaten uygulama olarak açık ✓') : installPrompt ? t('Ana ekrana ekle, tam ekran oyna.') : t('iPhone: Paylaş → Ana Ekrana Ekle. Android/PC: tarayıcı menüsü → Uygulamayı yükle.')}</div></div>${installPrompt && !standalone ? `<button class="btn sm" onclick="installPrompt.prompt();installPrompt=null">${t('Yükle')}</button>` : ''}</div>
-    <div class="set-row"><div><div>🖥️ ${t('Sunucu adresi')}</div><div class="muted small">${t('Oyunu sunucunun adresinden açıyorsan boş bırak. Örn: https://mangala-online.onrender.com')}</div></div>
+    <div class="set-row"><div><div>🖥️ ${t('Sunucu adresi')}</div><div class="muted small">${t('Oyunu sunucunun adresinden açıyorsan boş bırak. Örn: https://oyun.serli.net')}</div></div>
       <div class="row"><input class="inp" id="srv" style="width:240px" value="${esc(lsGet('mangala_server', ''))}" placeholder="(${t('otomatik')})"><button class="btn sm" onclick="lsSet('mangala_server',$('srv').value.trim());netClose();netConnect();toast('✓')">${t('Kaydet')}</button></div></div>
     ${AUTH.guest ? `<div class="set-row" style="border:0"><span class="muted">${t('Misafir ilerlemesini siler (eğitim dahil).')}</span><button class="btn red sm" onclick="resetGuest()">${t('İlerlemeyi Sıfırla')}</button></div>` : ''}
   </div>`;
@@ -971,6 +1036,6 @@ function tutAfter(s) {
 }
 function tutNext() {
   if (!tut.stepDone) return; const s = TUT[S.tutStep]; Sound.sfx.click();
-  if (s.type === 'final') { S.tutorialDone = true; S.tutStep = 0; persist(); addCoins(TUT_BONUS); confetti(); Sound.sfx.win(); toast('🎓 ' + t('Eğitim tamamlandı!') + ' +' + TUT_BONUS + ' 🪙'); go('menu'); return; }
+  if (s.type === 'final') { S.tutorialDone = true; S.tutStep = 0; persist(); addCoins(TUT_BONUS); confetti(); Sound.sfx.win(); toast('🎓 ' + t('Eğitim tamamlandı!') + ' +' + TUT_BONUS + ' 🪙'); S.rulesAsked = true; persist(); if (S.guideDone) go('menu'); else { guideI = 0; go('guide'); } return; }
   S.tutStep++; persist(); tutShow(); window.scrollTo({ top: 0, behavior: 'smooth' });
 }

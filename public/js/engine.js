@@ -7,6 +7,7 @@
 (function (root) {
   const STORE = [6, 13];
   const INIT = [4, 4, 4, 4, 4, 4, 0, 4, 4, 4, 4, 4, 4, 0];
+  const BOARDS = { mini: [3, 3, 3, 3, 3, 3, 0, 3, 3, 3, 3, 3, 3, 0], dev: [6, 6, 6, 6, 6, 6, 0, 6, 6, 6, 6, 6, 6, 0] };
   const PITS = [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12];
   const isPit = (p, i) => p === 0 ? (i >= 0 && i <= 5) : (i >= 7 && i <= 12);
   const ownerOf = i => i <= 6 ? 0 : 1;
@@ -62,7 +63,7 @@
     return ((t ^ t >>> 14) >>> 0) / 4294967296;
   }
   function newState(mode = 'classic', seed = 1, first = 0, board) {
-    const st = { b: (board || INIT).slice(), turn: first, mode, seed: seed >>> 0, bonus: [0, 0], mystery: -1,
+    const st = { b: (board || BOARDS[mode] || INIT).slice(), turn: first, mode, seed: seed >>> 0, bonus: [0, 0], mystery: -1,
       cards: null, frozen: null, shield: null, over: false, winner: null, moves: 0 };
     if (mode === 'mystery') st.mystery = PITS[Math.floor(rnd(st) * 12)];
     if (mode === 'cards') st.cards = [{ freeze: 1, swap: 1, shield: 1 }, { freeze: 1, swap: 1, shield: 1 }];
@@ -177,7 +178,7 @@
     }
     return best;
   }
-  const fastOK = st => st.mode === 'classic' || st.mode === 'blitz' || st.mode === 'reverse';
+  const fastOK = st => ['classic', 'blitz', 'reverse', 'mini', 'dev'].includes(st.mode);
   function scoreMoves(st, p, depth) {
     const out = [];
     if (fastOK(st)) {

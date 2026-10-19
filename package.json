@@ -1,17 +1,19 @@
 {
   "name": "mangala-online",
-  "version": "3.0.0",
+  "version": "3.6.0",
   "description": "Dijital Mangala - botlar, mağaza, sezon kartı ve çok oyunculu mod",
   "main": "server.js",
   "scripts": {
+    "build": "echo build",
     "start": "node server.js"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
-    "ws": "^8.18.0",
-    "mongodb": "^6.10.0"
+    "mongodb": "^6.10.0",
+    "mysql2": "^3.11.0",
+    "ws": "^8.18.0"
   },
   "license": "MIT"
 }

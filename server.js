@@ -131,7 +131,7 @@ async function authUser(req) {
   if (!tok || tok.length > 100) return null;
   const s = await db.getSession(tok); if (!s) return null;
   const u = await db.getUser(s.key); if (!u) return null;
-  u._token = tok; return u;
+  Object.defineProperty(u, '_token', { value: tok, enumerable: false }); return u;   // oturum anahtarı veritabanına yazılmasın
 }
 
 const need = (a, p) => ST.can(a, p) ? null : [403, { error: 'Bu işlem için yetkin yok.' }];
@@ -149,7 +149,8 @@ function act(perm, fn) {
 const broadcastContent = () => wss.clients.forEach(c => sendWs(c, { t: 'content', content: ST.content() }));
 const api = {
   'GET /api/config': async () => [200, { mail: mail.configured(), db: db.kind }],
-  'GET /api/content': async () => [200, ST.content()],
+  // INVITE_URL (isteğe bağlı): davet linkleri başka bir sayfaya gitsin istenirse; boşsa oyunun kendi adresi kullanılır
+  'GET /api/content': async () => [200, { ...ST.content(), inviteUrl: process.env.INVITE_URL || '' }],
   'GET /api/profile': async (req, b, ip, a, q) => {
     const u = await db.getUser(String(q.get('name') || '').toLowerCase().slice(0, 16)); if (!u) return [404, { error: 'Kullanıcı yok.' }];
     const sv = u.save || {}, T = sv.totals || {};
@@ -172,6 +173,48 @@ const api = {
     if (reserved(nn)) return [400, { error: 'Bu kullanıcı adı kullanılamaz.' }];
     const st = await sendCode(u, 'rename', u.email, b.lang, { newName: nn });
     return [200, { ok: true, email: maskEmail(u.email), mailStatus: st }];
+  },
+  // ---------------- ARKADAŞLAR ----------------
+  'GET /api/friends': async req => {
+    const u = await authUser(req); if (!u) return [401, { error: 'Oturum bulunamadı.' }];
+    const friends = [], requests = [];
+    for (const k of u.friends || []) {
+      const f = await db.getUser(k); if (!f) continue; const sv = f.save || {}, socks = userSockets.get(k);
+      const live = socks ? [...socks].find(w => { const r = w.room && rooms.get(w.room); return r && r.players[1] && !r.over; }) : null;
+      friends.push({ name: f.name, online: !!socks, inGame: !!live, room: live && !rooms.get(live.room).private ? live.room : null, avatar: sv.eq ? sv.eq.avatar : 'gulen', frame: sv.eq ? sv.eq.frame : 'yok', rank: ST.badge(f), elo: f.elo });
+    }
+    for (const k of u.freq || []) { const f = await db.getUser(k); if (f) requests.push({ name: f.name, avatar: f.save && f.save.eq ? f.save.eq.avatar : 'gulen' }); }
+    return [200, { friends, requests }];
+  },
+  'POST /api/friends/add': async (req, b, ip) => {
+    const u = await authUser(req); if (!u) return [401, { error: 'Oturum bulunamadı.' }];
+    if (limited(ip, 'friend', 40, 3600000)) return [429, { error: 'Çok fazla istek. Biraz sonra tekrar dene.' }];
+    const f = await db.getUser(String(b.name || '').trim().toLowerCase()); if (!f) return [404, { error: 'Kullanıcı yok.' }];
+    if (f.key === u.key) return [400, { error: 'Kendini arkadaş olarak ekleyemezsin.' }];
+    u.friends = u.friends || []; u.freq = u.freq || []; f.friends = f.friends || []; f.freq = f.freq || [];
+    if (u.friends.includes(f.key)) return [400, { error: 'Zaten arkadaşsınız.' }];
+    if (u.friends.length >= 100) return [400, { error: 'Arkadaş listen dolu (en fazla 100).' }];
+    if (u.freq.includes(f.key)) {            // o da istek göndermişse: direkt arkadaş olun
+      u.freq = u.freq.filter(k => k !== f.key); u.friends.push(f.key); if (!f.friends.includes(u.key)) f.friends.push(u.key);
+      await db.saveUser(u); await db.saveUser(f); pushUser(f.key, { t: 'friendUpdate', msg: u.name }); return [200, { ok: true, accepted: true }];
+    }
+    if (!f.freq.includes(u.key)) { f.freq = f.freq.concat(u.key).slice(-50); await db.saveUser(f); }
+    pushUser(f.key, { t: 'friendReq', from: u.name });
+    return [200, { ok: true }];
+  },
+  'POST /api/friends/respond': async (req, b) => {
+    const u = await authUser(req); if (!u) return [401, { error: 'Oturum bulunamadı.' }];
+    const f = await db.getUser(String(b.name || '').trim().toLowerCase()); if (!f) return [404, { error: 'Kullanıcı yok.' }];
+    u.freq = (u.freq || []).filter(k => k !== f.key);
+    if (b.accept) { u.friends = u.friends || []; f.friends = f.friends || []; if (!u.friends.includes(f.key)) u.friends.push(f.key); if (!f.friends.includes(u.key)) f.friends.push(u.key); await db.saveUser(f); pushUser(f.key, { t: 'friendUpdate', msg: u.name }); }
+    await db.saveUser(u); return [200, { ok: true }];
+  },
+  'POST /api/friends/remove': async (req, b) => {
+    const u = await authUser(req); if (!u) return [401, { error: 'Oturum bulunamadı.' }];
+    const f = await db.getUser(String(b.name || '').trim().toLowerCase());
+    u.friends = (u.friends || []).filter(k => !f || k !== f.key); await db.saveUser(u);
+    if (f) { f.friends = (f.friends || []).filter(k => k !== u.key); await db.saveUser(f); }
+    return [200, { ok: true }];
   },
   'POST /api/username/confirm': async (req, b) => {
     const u = await authUser(req); if (!u) return [401, { error: 'Oturum bulunamadı.' }];
@@ -347,7 +390,7 @@ const api = {
   'POST /api/admin/item': act('items', async (a, u, b) => {
     if (b.bots) { await modifySave(u.key, s => { s.bots = ['kolay', 'orta', 'zor', 'cokzor', 'efsane']; }); return ['Tüm botları açtı']; }
     const cat = String(b.cat || ''), id = String(b.id || '');
-    if (!['boards', 'stones', 'hands', 'avatars', 'frames', 'emojis', 'msgs'].includes(cat) || !idRe.test(id)) return [400, { error: 'Geçersiz eşya.' }];
+    if (!['boards', 'stones', 'hands', 'avatars', 'frames', 'emojis', 'msgs', 'bgs', 'wins'].includes(cat) || !idRe.test(id)) return [400, { error: 'Geçersiz eşya.' }];
     await modifySave(u.key, s => { s.own = s.own || {}; s.own[cat] = s.own[cat] || []; if (!s.own[cat].includes(id)) s.own[cat].push(id); });
     pushUser(u.key, { t: 'announce', msg: '🎁 ' + a.name + ' sana bir eşya gönderdi!' });
     return ['Eşya verdi', cat + '/' + id];
@@ -405,6 +448,11 @@ const api = {
     if (!await ST.setEvents(b.events)) return [400, { error: 'Geçersiz etkinlik listesi.' }];
     ST.log(a, 'Etkinlikleri düzenledi', '', (b.events || []).map(x => x.name).join(', ')); broadcastContent(); return [200, { ok: true, content: ST.content() }];
   },
+  'POST /api/admin/config': async (req, b, ip, a) => {
+    const e = need(a, 'config'); if (e) return e;
+    if (!await ST.setConfig(b.config)) return [400, { error: 'Geçersiz ayar: çarkta 4-12 geçerli dilim olmalı.' }];
+    const c = ST.content().config; ST.log(a, 'Oyun ayarlarını düzenledi', '', `çark ${c.wheel.length} dilim, indirim %${c.sale.off}, bulmaca x${c.dpzMult}`); broadcastContent(); return [200, { ok: true, content: ST.content() }];
+  },
   'POST /api/admin/ui': async (req, b, ip, a) => {
     const e = need(a, 'ui'); if (e) return e;
     if (!await ST.setUI(b.ui)) return [400, { error: 'Geçersiz tasarım.' }];
@@ -450,7 +498,7 @@ const queues = { casual: [], ranked: [], blitz: [], party: [] };
 const tourQueues = { 4: [], 8: [] };
 const CODE_CHARS = 'ABCDEFGHJKLMNPRSTUVYZ23456789';
 const idRe = /^[a-z0-9_]{1,20}$/;
-const MODES = ['classic', 'blitz', 'reverse', 'mystery', 'cards'];
+const MODES = ['classic', 'blitz', 'reverse', 'mystery', 'cards', 'mini', 'dev'];
 const onlineCount = () => { let n = 0; wss.clients.forEach(c => { if (c.readyState === 1) n++; }); return n; };
 const makeCodeStr = (m = rooms) => { let c; do { c = Array.from({ length: 4 }, () => CODE_CHARS[crypto.randomInt(CODE_CHARS.length)]).join(''); } while (m.has(c)); return c; };
 const fp = i => (i + 7) % 14;
@@ -736,6 +784,15 @@ wss.on('connection', ws => {
           for (const s of room.specs) sendWs(s, { t: 'emote', seat, kind: m.kind, id: m.id });
           break;
         }
+        case 'invite': {
+          if (!ws.user) return sendWs(ws, { t: 'err', msg: 'Arkadaş davet etmek için giriş yapmalısın.' });
+          if (!room || !room.private || room.players[1]) return sendWs(ws, { t: 'err', msg: 'Önce bir oda kur.' });
+          const target = String(m.to || '').toLowerCase(), me = await db.getUser(ws.user.key);
+          if (!me || !(me.friends || []).includes(target)) return sendWs(ws, { t: 'err', msg: 'Sadece arkadaşlarını davet edebilirsin.' });
+          if (!userSockets.has(target)) return sendWs(ws, { t: 'err', msg: 'Arkadaşın şu an çevrimdışı.' });
+          pushUser(target, { t: 'invited', from: ws.user.name, code: room.code, mode: room.mode });
+          break;
+        }
         case 'resign':
           if (room && room.players[1] && !room.over) finish(room, 1 - room.players.indexOf(ws), 'resign');
           break;
@@ -805,5 +862,5 @@ setInterval(() => { const n = onlineCount(); wss.clients.forEach(c => sendWs(c, 
     console.log(`Test admin hesabı oluşturuldu (kullanıcı: admin, şifre: ${process.env.ADMIN_PASSWORD ? 'ADMIN_PASSWORD' : 'admin'})`);
   } else { admin.unlimited = true; if (!admin.role || admin.role === 'user') admin.role = 'admin'; await db.saveUser(admin); }
   if (!mail.configured()) console.log('E-posta servisi ayarlı değil: doğrulama kodları kayıtlara ve admin paneline yazılacak.');
-  server.listen(PORT, () => console.log(`Mangala sunucusu çalışıyor: http://localhost:${PORT}`));
+  server.listen(PORT, process.env.HOST || '0.0.0.0', () => console.log(`Mangala sunucusu çalışıyor: http://localhost:${PORT}`));
 })();

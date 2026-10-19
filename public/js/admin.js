@@ -4,11 +4,11 @@
    ========================================================= */
 const ADM = { tab: 'overview', q: '', page: 0, ranks: null, events: null, ui: null, dirty: {} };
 const ADM_TABS = [['overview', '📊', 'Genel', 'panel'], ['users', '👥', 'Oyuncular', 'panel'], ['rooms', '🎮', 'Maçlar', 'rooms'], ['ranks', '🏅', 'Ranklar', 'ranksEdit'],
-  ['events', '🎊', 'Etkinlik Planlayıcı', 'events'], ['ui', '🎨', 'Arayüz Tasarımcısı', 'ui'], ['audit', '📜', 'Kayıtlar', 'audit']];
+  ['events', '🎊', 'Etkinlik Planlayıcı', 'events'], ['ui', '🎨', 'Arayüz Tasarımcısı', 'ui'], ['config', '⚙️', 'Oyun Ayarları', 'config'], ['audit', '📜', 'Kayıtlar', 'audit']];
 const PERM_INFO = { panel: 'Yönetim paneline giriş', kick: 'Sunucudan atma', warn: 'Uyarı gönderme', mute: 'Susturma (emoji/mesaj)', ban: 'Banlama',
   announce: 'Herkese duyuru', rooms: 'Maçları görme/kapatma', audit: 'Yönetim kayıtlarını görme', coins: 'Para verme/alma', xp: 'XP verme', items: 'Eşya verme / botları açma',
   elo: 'Elo ayarlama', setpw: 'Şifre belirleme, e-posta ve kodları görme', rename: 'Kullanıcı adı değiştirme', resetprogress: 'İlerleme sıfırlama', delete: 'Hesap silme',
-  ranks: 'Rank verme (kendinden düşük)', unlimited: 'Sınırsız para & tüm içerik açık', events: 'Etkinlik planlama', ui: 'Arayüz tasarımı', ranksEdit: 'Rank oluşturma/düzenleme' };
+  ranks: 'Rank verme (kendinden düşük)', unlimited: 'Sınırsız para & tüm içerik açık', events: 'Etkinlik planlama', ui: 'Arayüz tasarımı', ranksEdit: 'Rank oluşturma/düzenleme', config: 'Oyun ayarları (şans çarkı, mağaza indirimi, bulmaca ödülü, duyuru şeridi)' };
 const METRIC_INFO = { win: 'Galibiyet', play: 'Oynanan oyun', even: 'Çift kuralı alımı', empty: 'Boş kuyu alımı', extra: 'Ekstra tur', hardwin: 'Zor rakip / çevrimiçi galibiyet',
   puzzle: 'Çözülen bulmaca', blitz: 'Yıldırım oyunu', party: 'Parti modu oyunu', emote: 'Gönderilen emoji/mesaj', big: '25+ taşla bitirme', onlineplay: 'Çevrimiçi oyun' };
 const SCREEN_INFO = { '': '— (buton yok)', mode: '⚔️ Oyna', bots: '🤖 Botlar', online: '🌍 Çevrimiçi', puzzles: '🧩 Bulmacalar', shop: '🛒 Mağaza', pass: '🎫 Sezon Kartı',
@@ -33,7 +33,7 @@ const fromLocalInput = v => new Date(v).getTime();
 const fmtDT = ms => ms ? new Date(ms).toLocaleString(LANG === 'en' ? 'en-GB' : 'tr-TR', { dateStyle: 'short', timeStyle: 'short' }) : '-';
 const opt = (o, cur) => Object.entries(o).map(([k, v]) => `<option value="${esc(k)}" ${k === cur ? 'selected' : ''}>${esc(Array.isArray(v) ? v[0] + ' ' + v[1] : v)}</option>`).join('');
 const itemOpts = (cat, cur) => Object.entries(CAT[cat] || {}).map(([id, it]) => `<option value="${id}" ${id === cur ? 'selected' : ''}>${esc(nm(it))}${it.src ? ' (' + it.src + ')' : ''}</option>`).join('');
-const catOpts = cur => opt({ boards: 'Tahta', stones: 'Taş', hands: 'El', avatars: 'Avatar', frames: 'Çerçeve', emojis: 'Emoji paketi', msgs: 'Mesaj paketi' }, cur);
+const catOpts = cur => opt({ boards: 'Tahta', stones: 'Taş', hands: 'El', avatars: 'Avatar', frames: 'Çerçeve', emojis: 'Emoji paketi', msgs: 'Mesaj paketi', bgs: 'Arka plan', wins: 'Zafer efekti' }, cur);
 
 RENDER.admin = async () => {
   if (!can('panel')) return go('menu');
@@ -43,7 +43,7 @@ RENDER.admin = async () => {
     <h2>${me.rank ? me.rank.icon : '🛡️'} ${t('Yönetim Paneli')} <span style="font-size:15px">${rankBadge(me.rank)}</span></h2>
     <div class="tabs">${tabs.map(([k, ic, n]) => `<button class="tab ${ADM.tab === k ? 'on' : ''}" onclick="ADM.tab='${k}';RENDER.admin()">${ic} ${t(n)}</button>`).join('')}</div>
     <div id="admbody"><div class="spinner"></div></div>`;
-  try { await ({ overview: admOverview, users: admUsers, rooms: admRooms, ranks: admRanks, events: admEvents, ui: admUI, audit: admAudit }[ADM.tab])($('admbody')); }
+  try { await ({ overview: admOverview, users: admUsers, rooms: admRooms, ranks: admRanks, events: admEvents, ui: admUI, audit: admAudit, config: admConfig }[ADM.tab])($('admbody')); }
   catch (e) { console.error(e); $('admbody').innerHTML = `<p class="err">${t('Sunucuya ulaşılamadı.')}</p>`; }
 };
 async function admPost(action, body) {
@@ -57,8 +57,8 @@ async function admOverview(el) {
   const { s, j } = await api('GET', '/api/admin/stats'); if (s !== 200) throw new Error();
   const me = AUTH.user;
   el.innerHTML = `<div class="stat-grid"><div class="stat"><b>${j.users}</b>${t('Kayıtlı oyuncu')}</div><div class="stat"><b>${j.online}</b>${t('Şu an bağlı')}</div><div class="stat"><b>${j.rooms}</b>${t('Canlı maç')}</div>
-      <div class="stat"><b>${j.tours}</b>${t('Turnuva')}</div><div class="stat"><b>${j.db === 'mongo' ? '✅ MongoDB' : '⚠️ ' + t('Dosya')}</b>${t('Veritabanı')}</div><div class="stat"><b>${j.mail ? '✅' : '⚠️ ' + t('Kapalı')}</b>${t('E-posta servisi')}</div></div>
-    ${j.db !== 'mongo' ? `<p class="small" style="color:var(--gold)">⚠️ ${t('Veritabanı dosyada: ücretsiz Render sunucusu yeniden başlarsa hesaplar silinir. KURULUM.md\'deki MongoDB adımını yap.')}</p>` : ''}
+      <div class="stat"><b>${j.tours}</b>${t('Turnuva')}</div><div class="stat"><b>${j.db === 'mongo' ? '✅ MongoDB' : j.db === 'mysql' ? '✅ MySQL' : '⚠️ ' + t('Dosya')}</b>${t('Veritabanı')}</div><div class="stat"><b>${j.mail ? '✅' : '⚠️ ' + t('Kapalı')}</b>${t('E-posta servisi')}</div></div>
+    ${j.db === 'file' ? `<p class="small" style="color:var(--gold)">⚠️ ${t('Veritabanı dosyada: güncellemede veya yeniden başlatmada hesaplar silinebilir! GoDaddy\'de uygulamaya MySQL ekle (GODADDY.md, 3. bölüm).')}</p>` : ''}
     <div class="sec-title"><h3>🔑 ${t('Yetkilerin')}</h3></div>
     <div class="card"><div class="row">${rankBadge(me.rank)} ${me.unlimited ? `<span class="badge">∞ ${t('Sınırsız para')}</span>` : ''}</div>
       <div class="perms" style="margin-top:10px">${(me.perms || []).map(p => `<span class="perm on">✓ ${esc(t(PERM_INFO[p] || p))}</span>`).join('')}</div></div>

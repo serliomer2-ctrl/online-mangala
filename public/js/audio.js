@@ -68,30 +68,35 @@ const Sound = (() => {
   };
 
   /* ---------- lo-fi müzik ---------- */
-  const BPM = 76, STEP = 60 / BPM / 2; // sekizlik
-  // Fmaj7 – Em7 – Dm7 – Cmaj7 (her biri 1 ölçü = 8 sekizlik)
-  const CHORDS = [[53, 57, 60, 64], [52, 55, 59, 62], [50, 53, 57, 60], [48, 52, 55, 59]];
-  const SCALE = [72, 74, 76, 79, 81, 84];
+  // Müzik temaları: lofi (varsayılan), çay ocağı (Hicaz makamı + darbuka), 8-bit, gece
+  const THEMES = {
+    lofi: { bpm: 76, chords: [[53, 57, 60, 64], [52, 55, 59, 62], [50, 53, 57, 60], [48, 52, 55, 59]], scale: [72, 74, 76, 79, 81, 84], pad: 'triangle', lead: 'sine', mel: 0.22, swing: 0.18, vinyl: true, cut: 900, kick: [0, 5] },
+    cay: { bpm: 92, chords: [[50, 57, 62], [50, 57, 62], [48, 55, 60], [50, 54, 57]], scale: [74, 75, 78, 79, 81, 82, 84, 86], pad: 'sine', lead: 'triangle', mel: 0.42, swing: 0.08, vinyl: false, cut: 1300, kick: [0, 3, 6], tek: [2, 5, 7] },
+    chip: { bpm: 124, chords: [[48, 52, 55], [45, 48, 52], [41, 45, 48], [43, 47, 50]], scale: [72, 74, 76, 79, 81, 84, 86], pad: 'square', lead: 'square', mel: 0.5, swing: 0, vinyl: false, cut: 2400, kick: [0, 4] },
+    gece: { bpm: 60, chords: [[45, 52, 57, 60], [41, 48, 53, 57], [43, 50, 55, 59], [40, 47, 52, 55]], scale: [69, 72, 74, 76, 79], pad: 'sine', lead: 'sine', mel: 0.12, swing: 0.12, vinyl: true, cut: 650, kick: [0] }
+  };
+  let TH = THEMES.lofi, STEP = 60 / TH.bpm / 2; // sekizlik
   const mtof = m => 440 * 2 ** ((m - 69) / 12);
   function pad(m, t, dur) {
     for (const det of [-6, 6]) { const o = ctx.createOscillator(), g = ctx.createGain(), f = ctx.createBiquadFilter();
-      o.type = 'triangle'; o.frequency.value = mtof(m); o.detune.value = det; f.type = 'lowpass'; f.frequency.value = 900;
+      o.type = TH.pad; o.frequency.value = mtof(m); o.detune.value = det; f.type = 'lowpass'; f.frequency.value = TH.cut;
       o.connect(f).connect(g).connect(musicBus);
-      g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.035, t + 0.4); g.gain.setValueAtTime(0.035, t + dur - 0.4); g.gain.linearRampToValueAtTime(0.0001, t + dur);
+      const pv = TH.pad === 'square' ? 0.012 : 0.035; g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(pv, t + 0.4); g.gain.setValueAtTime(pv, t + dur - 0.4); g.gain.linearRampToValueAtTime(0.0001, t + dur);
       o.start(t); o.stop(t + dur + 0.05); }
   }
   function kick(t) { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(40, t + 0.15);
     o.connect(g).connect(musicBus); env(g, t, 0.003, 0.5, 0.25); o.start(t); o.stop(t + 0.3); }
   function schedule() {
     while (nextBeat < ctx.currentTime + 0.25) {
-      const t = nextBeat, bar = Math.floor(beat / 8) % 4, b = beat % 8, swing = b % 2 ? STEP * 0.18 : 0, tt = t + swing;
-      if (b === 0) { CHORDS[bar].forEach(m => pad(m, t, STEP * 8)); tone(mtof(CHORDS[bar][0] - 12), { t, a: 0.02, dec: STEP * 6, vol: 0.12, bus: musicBus, filter: 400 }); }
-      if (b === 0 || b === 5) kick(tt);
+      const t = nextBeat, bar = Math.floor(beat / 8) % 4, b = beat % 8, swing = b % 2 ? STEP * TH.swing : 0, tt = t + swing;
+      if (b === 0) { TH.chords[bar].forEach(m => pad(m, t, STEP * 8)); tone(mtof(TH.chords[bar][0] - 12), { t, a: 0.02, dec: STEP * 6, vol: 0.12, bus: musicBus, filter: 400 }); }
+      if (TH.kick.includes(b)) kick(tt);
+      if (TH.tek && TH.tek.includes(b)) noise({ t: tt, dec: 0.06, vol: 0.08, type: 'bandpass', freq: 2600, q: 2, bus: musicBus });
       if (b === 4) noise({ t: tt, dec: 0.16, vol: 0.09, freq: 1800, q: 0.8, bus: musicBus });
       if (b % 2 === 1 || Math.random() < 0.3) noise({ t: tt, dec: 0.03, vol: 0.035, type: 'highpass', freq: 8000, bus: musicBus });
-      if (Math.random() < 0.22) { const m = SCALE[Math.floor(Math.random() * SCALE.length)]; tone(mtof(m), { type: 'sine', t: tt, a: 0.01, dec: STEP * 2.5, vol: 0.05, bus: musicBus });
-        tone(mtof(m), { type: 'sine', t: tt + STEP * 1.5, a: 0.01, dec: STEP * 2, vol: 0.02, bus: musicBus }); }
-      if (Math.random() < 0.5) noise({ t: t + Math.random() * STEP, dec: 0.004, vol: 0.02 + Math.random() * 0.03, type: 'highpass', freq: 3000, bus: musicBus }); // plak cızırtısı
+      if (Math.random() < TH.mel) { const m = TH.scale[Math.floor(Math.random() * TH.scale.length)], lv = TH.lead === 'square' ? 0.4 : 1; tone(mtof(m), { type: TH.lead, t: tt, a: 0.01, dec: STEP * 2.5, vol: 0.05 * lv, bus: musicBus });
+        tone(mtof(m), { type: TH.lead, t: tt + STEP * 1.5, a: 0.01, dec: STEP * 2, vol: 0.02 * lv, bus: musicBus }); }
+      if (TH.vinyl && Math.random() < 0.5) noise({ t: t + Math.random() * STEP, dec: 0.004, vol: 0.02 + Math.random() * 0.03, type: 'highpass', freq: 3000, bus: musicBus }); // plak cızırtısı
       nextBeat += STEP; beat++;
     }
   }
@@ -110,6 +115,8 @@ const Sound = (() => {
     setMusicVol(v) { musicVol = v; applyMusicGain(true); },
     music(on) { on ? startMusic() : stopMusic(); },
     duck(on) { duck = on ? 0.45 : 1; applyMusicGain(); },
+    theme(k) { if (THEMES[k] && THEMES[k] !== TH) { TH = THEMES[k]; STEP = 60 / TH.bpm / 2; } },
+    get themes() { return Object.keys(THEMES); },
     get musicPlaying() { return musicOn; }
   };
 })();

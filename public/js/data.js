@@ -82,7 +82,26 @@ const CAT = {
 const CAT_INFO = {
   featured:{name:'⭐ Öne Çıkanlar',en:'⭐ Featured'}, boards:{name:'🟫 Tahtalar',en:'🟫 Boards',eq:'board'}, stones:{name:'🔴 Taşlar',en:'🔴 Stones',eq:'stone'},
   hands:{name:'✋ Eller',en:'✋ Hands',eq:'hand'}, avatars:{name:'🙂 Avatarlar',en:'🙂 Avatars',eq:'avatar'}, frames:{name:'⭕ Çerçeveler',en:'⭕ Frames',eq:'frame'},
-  emojis:{name:'😀 Emojiler',en:'😀 Emojis'}, msgs:{name:'💬 Mesajlar',en:'💬 Messages'}
+  emojis:{name:'😀 Emojiler',en:'😀 Emojis'}, msgs:{name:'💬 Mesajlar',en:'💬 Messages'},
+  bgs:{name:'🌌 Arka Planlar',en:'🌌 Backgrounds',eq:'bg'}, wins:{name:'🎆 Zafer Efektleri',en:'🎆 Victory FX',eq:'win'}
+};
+CAT.bgs = {
+  yok:       {name:'Sıcak Işık',en:'Warm Glow',price:0,icon:'✨',desc:'Süzülen sıcak ışık zerreleri',den:'Floating warm light motes'},
+  kar:       {name:'Kar Yağışı',en:'Snowfall',price:400,icon:'❄️',desc:'Sakin bir kış akşamı',den:'A calm winter evening'},
+  yaprak:    {name:'Sonbahar',en:'Autumn',price:600,icon:'🍂',desc:'Dans eden turuncu yapraklar',den:'Dancing orange leaves'},
+  kiraz:     {name:'Kiraz Çiçeği',en:'Sakura',price:900,icon:'🌸',desc:'Rüzgârda savrulan pembe yapraklar',den:'Pink petals in the wind'},
+  atesbocegi:{name:'Ateş Böcekleri',en:'Fireflies',price:1200,icon:'🟡',desc:'Yaz gecesinde yanıp sönen ışıklar',den:'Blinking lights of a summer night'},
+  yildiz:    {name:'Yıldızlı Gece',en:'Starry Night',price:1500,icon:'⭐',desc:'Göz kırpan yıldızlar ve kayan yıldız',den:'Twinkling stars and shooting stars'},
+  deniz:     {name:'Deniz Altı',en:'Under the Sea',price:1800,icon:'🫧',desc:'Yükselen kabarcıklar',den:'Rising bubbles'},
+  hazine:    {name:'Hazine Yağmuru',en:'Treasure Rain',price:3000,icon:'🪙',desc:'Gökten altın yağar',den:'Gold falls from the sky'}
+};
+CAT.wins = {
+  klasik:{name:'Konfeti',en:'Confetti',price:0,icon:'🎊',desc:'Rengârenk klasik konfeti',den:'Classic colorful confetti'},
+  kalp:  {name:'Kalpler',en:'Hearts',price:700,icon:'💖',desc:'Sevgi dolu bir zafer',den:'A victory full of love'},
+  havai: {name:'Havai Fişek',en:'Fireworks',price:900,icon:'🎆',desc:'Gökyüzünde patlayan renkler',den:'Colors bursting in the sky'},
+  altin: {name:'Altın Yağmuru',en:'Gold Rain',price:1200,icon:'🪙',desc:'Ekrana altın yağar',den:'Gold rains on the screen'},
+  yildiz:{name:'Yıldız Patlaması',en:'Star Burst',price:1500,icon:'🌟',desc:'Ortadan fışkıran yıldızlar',den:'Stars bursting from the center'},
+  ejder: {name:'Ejderha Nefesi',en:'Dragon Breath',price:2500,icon:'🐉',desc:'Bir ejderha ekranı ateşe verir!',den:'A dragon sets the screen on fire!'}
 };
 const BOTS = [
   {id:'kolay', name:'Çırak', en:'Apprentice', emoji:'🐣', bg:'#b2f2bb,#2b8a3e', hand:'bugday', lvl:'Kolay', len:'Easy', color:'#4cc38a', stars:1, price:0, reward:50,
@@ -101,6 +120,8 @@ const MODES = {
   blitz:{name:'Yıldırım',en:'Blitz',icon:'⚡',desc:'Her hamle için sadece 8 saniye! Süre biterse rastgele hamle yapılır.',den:'Only 8 seconds per move! Time out = random move.'},
   reverse:{name:'Ters Mangala',en:'Reverse',icon:'🔄',desc:'En AZ taş toplayan kazanır! Rakibe taş doldurmaya çalış.',den:'FEWEST stones wins! Try to stuff your opponent.'},
   mystery:{name:'Gizemli Kuyu',en:'Mystery Pit',icon:'❓',desc:'❓ işaretli kuyudan alınan taşlar 2 kat sayılır. Son taşı oraya düşürürsen +2 puan ve kuyu yer değiştirir.',den:'Stones captured from the ❓ pit count double. Land your last stone there for +2 and the pit moves.'},
+  mini:{name:'Mini Mangala',en:'Mini Mangala',icon:'🌱',desc:'Her kuyuda 3 taş: hızlı, kısa ve keskin maçlar.',den:'3 stones per pit: quick, short, sharp games.'},
+  dev:{name:'Dev Mangala',en:'Giant Mangala',icon:'🏔️',desc:'Her kuyuda 6 taş: uzun, taktik dolu dev maçlar.',den:'6 stones per pit: long games full of tactics.'},
   cards:{name:'Süper Güçler',en:'Power Cards',icon:'🃏',desc:'Her oyuncunun 3 kartı var, her biri maçta 1 kez: ❄️ Dondur, 🔀 Takas, 🛡️ Kalkan.',den:'Each player has 3 one-time cards: ❄️ Freeze, 🔀 Swap, 🛡️ Shield.'}
 };
 const CARDS = {
@@ -114,6 +135,9 @@ const LEAGUES = [
   {id:'usta',name:'Mangala Ustası',en:'Mangala Master',min:1700,icon:'👑',color:'#e5534b'}
 ];
 const ACHS = [
+  {id:'gunluk7',icon:'📅',name:'Her Gün Bir Bulmaca',en:'Puzzle a Day',desc:'Günün Bulmacası\'nı 7 gün üst üste çöz.',den:'Solve the Daily Puzzle 7 days in a row.',reward:400},
+  {id:'yanyana',icon:'👫',name:'Masa Başı',en:'Tabletop',desc:'Yan Yana modunda bir maç bitir.',den:'Finish a Side by Side match.',reward:80},
+  {id:'geri_almadan',icon:'💪',name:'Yardımsız',en:'Unassisted',desc:'Usta veya Efsane botu Geri Al/İpucu kullanmadan yen.',den:'Beat the Master or Legend bot without Undo/Hint.',reward:300},
   {id:'ilk_zafer',icon:'🥇',name:'İlk Zafer',en:'First Victory',desc:'İlk oyununu kazan.',den:'Win your first game.',reward:100},
   {id:'hazine_canavari',icon:'💰',name:'Hazine Canavarı',en:'Treasure Monster',desc:'Tek turda hazinene 10+ taş sok.',den:'Put 10+ stones in your store in one turn.',reward:200,title:'kuyu_efendisi'},
   {id:'tertemiz',icon:'🧹',name:'Tertemiz Süpürme',en:'Clean Sweep',desc:'Rakibin bölgesini tek hamlede tamamen boşalt.',den:"Empty your opponent's whole side in one move.",reward:250,title:'supurgeci'},
@@ -296,13 +320,13 @@ const RULES={
 <h3>✋ Hamle</h3><ul><li>Kendi tarafındaki, içinde taş olan bir kuyu seçilir ve tüm taşlar alınır.</li><li>İlk taş alınan kuyuya bırakılır, kalanlar saat yönünün tersine birer birer dağıtılır.</li><li><b>Tek taş kuralı:</b> Kuyuda tek taş varsa o taş sıradaki kuyuya geçer.</li><li>Kendi hazinene taş koyulur, <b>rakibin hazinesi atlanır</b>.</li></ul>
 <h3>⭐ Özel Kurallar</h3><ul><li><b>Hazine kuralı:</b> Son taş kendi hazinene düşerse bir kez daha oynarsın.</li><li><b>Çift sayı kuralı:</b> Son taş rakibin kuyusunu çift yaparsa o kuyudaki tüm taşlar senindir.</li><li><b>Boş kuyu kuralı:</b> Son taş kendi boş kuyuna düşer ve karşıda taş varsa, o taş ile karşıdaki taşlar senindir.</li></ul>
 <h3>🏁 Oyun Sonu</h3><ul><li>Bir oyuncunun tarafı boşalınca oyun biter; taşları ilk biten, rakibin tarafındaki kalan taşları da alır.</li><li>Çok taşı olan kazanır. 24–24 beraberliktir.</li></ul>
-<h3>🎮 Oyun Modları</h3><ul><li><b>⚡ Yıldırım:</b> Her hamle 8 saniye.</li><li><b>🔄 Ters Mangala:</b> En az taş toplayan kazanır.</li><li><b>❓ Gizemli Kuyu:</b> ❓ kuyudan alınan taşlar 2 kat; son taşı oraya düşürmek +2 puan.</li><li><b>🃏 Süper Güçler:</b> ❄️ Dondur (rakip kuyusunu 1 tur kilitler), 🔀 Takas (iki komşu kuyunu değiştirir), 🛡️ Kalkan (bir tur taş kaptırmazsın). Kart kullanmak sıranı bitirmez.</li></ul>
+<h3>🎮 Oyun Modları</h3><ul><li><b>⚡ Yıldırım:</b> Her hamle 8 saniye.</li><li><b>🔄 Ters Mangala:</b> En az taş toplayan kazanır.</li><li><b>🌱 Mini Mangala:</b> Her kuyuda 3 taş (toplam 36), hızlı maçlar.</li><li><b>🏔️ Dev Mangala:</b> Her kuyuda 6 taş (toplam 72), uzun ve taktik maçlar.</li><li><b>❓ Gizemli Kuyu:</b> ❓ kuyudan alınan taşlar 2 kat; son taşı oraya düşürmek +2 puan.</li><li><b>🃏 Süper Güçler:</b> ❄️ Dondur (rakip kuyusunu 1 tur kilitler), 🔀 Takas (iki komşu kuyunu değiştirir), 🛡️ Kalkan (bir tur taş kaptırmazsın). Kart kullanmak sıranı bitirmez.</li></ul>
 <h3>🌍 Çevrimiçi</h3><ul><li>Hamle süresi 30 sn (yıldırımda 8 sn). Süre dolarsa rastgele hamle yapılır.</li><li>Oyundan ayrılan kaybetmiş sayılır. Dereceli maçlar Elo puanını değiştirir.</li></ul>`,
  en:`<h3>🎯 Goal</h3><p>Have more stones in your store than your opponent at the end.</p>
 <h3>🪵 Board & Setup</h3><ul><li>Each player has 6 pits (12 total) and 1 store.</li><li>Each pit starts with 4 stones (48 total). Stores start empty.</li><li>A coin toss decides who starts.</li></ul>
 <h3>✋ Moving</h3><ul><li>Choose a pit on your side with stones and pick them all up.</li><li>The first stone goes back into the same pit, the rest are sown counter-clockwise one by one.</li><li><b>Single stone:</b> a lone stone moves to the next pit.</li><li>You drop stones in your own store but <b>skip your opponent's store</b>.</li></ul>
 <h3>⭐ Special Rules</h3><ul><li><b>Store rule:</b> last stone in your store → play again.</li><li><b>Even rule:</b> if your last stone makes an opponent pit even, capture it.</li><li><b>Empty pit rule:</b> if your last stone lands in your empty pit with stones opposite, capture both.</li></ul>
 <h3>🏁 End</h3><ul><li>When one side is empty the game ends; the player who ran out takes the remaining stones.</li><li>Most stones wins. 24–24 is a draw.</li></ul>
-<h3>🎮 Modes</h3><ul><li><b>⚡ Blitz:</b> 8 seconds per move.</li><li><b>🔄 Reverse:</b> fewest stones wins.</li><li><b>❓ Mystery Pit:</b> stones captured from ❓ count double; landing there gives +2.</li><li><b>🃏 Power Cards:</b> ❄️ Freeze, 🔀 Swap, 🛡️ Shield — using a card doesn't end your turn.</li></ul>
+<h3>🎮 Modes</h3><ul><li><b>⚡ Blitz:</b> 8 seconds per move.</li><li><b>🔄 Reverse:</b> fewest stones wins.</li><li><b>🌱 Mini:</b> 3 stones per pit (36 total), quick games.</li><li><b>🏔️ Giant:</b> 6 stones per pit (72 total), long tactical games.</li><li><b>❓ Mystery Pit:</b> stones captured from ❓ count double; landing there gives +2.</li><li><b>🃏 Power Cards:</b> ❄️ Freeze, 🔀 Swap, 🛡️ Shield — using a card doesn't end your turn.</li></ul>
 <h3>🌍 Online</h3><ul><li>30 s per move (8 s in blitz). Time out = random move.</li><li>Leaving counts as a loss. Ranked games change your Elo.</li></ul>`
 };
